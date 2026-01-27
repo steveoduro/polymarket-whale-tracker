@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: polymarket-whale-tracker
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: POLL_INTERVAL_MS
+        value: "30000"
+      - key: ALERT_MIN_SIZE
+        value: "10"

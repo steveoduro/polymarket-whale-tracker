@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Polymarket Whale Tracker</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: '#00d4aa',
+            brandHover: '#00b894',
+            surface: '#1a1a2e',
+            surfaceLight: '#22223a',
+            bg: '#0f0f1a',
+            border: '#2a2a40',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { background: #0f0f1a; }
+    .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+    .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: #2a2a40; border-radius: 3px; }
+    @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    .fade-in { animation: fadeIn 0.3s ease-out; }
+  </style>
+</head>
+<body class="dark text-gray-200 min-h-screen">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useMemo } = React;
+
+    // =========================================================================
+    // API helpers
+    // =========================================================================
+    const api = {
+      get:    (path) => fetch(path).then(r => r.json()),
+      post:   (path, body) => fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json()),
+      patch:  (path, body) => fetch(path, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json()),
+      del:    (path) => fetch(path, { method: 'DELETE' }).then(r => r.json()),
+    };
+
+    // =========================================================================
+    // Formatting helpers
+    // =========================================================================
+    function timeAgo(ts) {
+      const s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+      if (s < 60) return `${s}s ago`;
+      if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+      if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+      return `${Math.floor(s / 86400)}d ago`;
+    }
+    function usd(n) {
+      const v = parseFloat(n) || 0;
+      if (v >= 1000000) return `$${(v/1000000).toFixed(2)}M`;
+      if (v >= 1000) return `$${(v/1000).toFixed(1)}K`;
+      return `$${v.toFixed(2)}`;
+    }
+    function pct(n) { return `${(parseFloat(n) * 100).toFixed(1)}\u00a2`; }
+    function shortAddr(a) { return a ? `${a.slice(0, 6)}...${a.slice(-4)}` : ''; }
+
+    // =========================================================================
+    // App
+    // =========================================================================
+    function App() {
+      const [tab, setTab] = useState('feed');
+      const [health, setHealth] = useState(null);
+      const [wallets, setWallets] = useState([]);
+      const [trades, setTrades] = useState([]);
+      const [alerts, setAlerts] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [statsWalletId, setStatsWalletId] = useState(null);
+
+      const fetchAll = useCallback(async () => {
+        try {
+          const [h, w, t, a] = await Promise.all([
+            api.get('/api/health'),
+            api.get('/api/wallets'),
+            api.get('/api/trades?limit=200'),
+            api.get('/api/alerts/history?limit=50'),
+          ]);
+          setHealth(h);
+          setWallets(w);
+          setTrades(t);
+          setAlerts(a);
+        } catch (e) { console.error(e); }
+        setLoading(false);
+      }, []);
+
+      useEffect(() => {
+        fetchAll();
+        const id = setInterval(fetchAll, 30000);
+        return () => clearInterval(id);
+      }, [fetchAll]);
+
+      return (
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <Header health={health} />
+          <StatsBar trades={trades} wallets={wallets} />
+          <TabBar tab={tab} setTab={setTab} tradeCount={trades.length} walletCount={wallets.length} alertCount={alerts.length} />
+          {loading ? (
+            <div className="flex items-center justify-center py-20">
+              <div className="w-8 h-8 border-2 border-brand border-t-transparent rounded-full animate-spin"></div>
+            </div>
+          ) : (
+            <>
+              {tab === 'feed'     && <ActivityFeed trades={trades} wallets={wallets} />}
+              {tab === 'wallets'  && <WalletsPanel wallets={wallets} onRefresh={fetchAll} onViewStats={setStatsWalletId} />}
+              {tab === 'discover' && <DiscoverPanel onRefresh={fetchAll} />}
+              {tab === 'alerts'   && <AlertsPanel alerts={alerts} onRefresh={fetchAll} />}
+            </>
+          )}
+          {statsWalletId && <WalletStatsModal walletId={statsWalletId} onClose={() => setStatsWalletId(null)} />}
+        </div>
+      );
+    }
+
+    // =========================================================================
+    // Header
+    // =========================================================================
+    function Header({ health }) {
+      const polling = health?.polling;
+      const statusColor = !health ? 'bg-gray-500' : polling?.running ? (polling.consecutiveErrors > 0 ? 'bg-yellow-500' : 'bg-green-500') : 'bg-red-500';
+      const statusText  = !health ? 'Connecting...' : polling?.running ? (polling.consecutiveErrors > 0 ? 'Degraded' : 'Polling') : 'Stopped';
+
+      return (
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-white tracking-tight">
+              <span className="mr-2">&#x1F40B;</span>Whale Tracker
+            </h1>
+          </div>
+          <div className="flex items-center gap-4 text-sm">
+            {polling?.lastPoll && (
+              <span className="text-gray-500">Last poll: {timeAgo(polling.lastPoll)}</span>
+            )}
+            <div className="flex items-center gap-2 bg-surface px-3 py-1.5 rounded-full border border-border">
+              <span className={`w-2 h-2 rounded-full ${statusColor} pulse-dot`}></span>
+              <span className="text-gray-300">{statusText}</span>
+            </div>
+            {health && (
+              <span className="text-gray-500">{health.trackedWallets} wallet{health.trackedWallets !== 1 ? 's' : ''}</span>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // =========================================================================
+    // Stats Bar (24h)
+    // =========================================================================
+    function StatsBar({ trades, wallets }) {
+      const stats = useMemo(() => {
+        const cutoff = Date.now() - 86400000;
+        const recent = trades.filter(t => new Date(t.timestamp).getTime() > cutoff);
+        const volume = recent.reduce((s, t) => s + (parseFloat(t.size) || 0), 0);
+        const biggest = recent.reduce((max, t) => (parseFloat(t.size) || 0) > (parseFloat(max?.size) || 0) ? t : max, null);
+
+        // Most active wallet by trade count
+        const walletCounts = {};
+        recent.forEach(t => {
+          const label = t.tracked_wallets?.nickname || t.tracked_wallets?.username || 'Unknown';
+          walletCounts[label] = (walletCounts[label] || 0) + 1;
+        });
+        const mostActive = Object.entries(walletCounts).sort((a, b) => b[1] - a[1])[0];
+
+        return { count: recent.length, volume, biggest, mostActive };
+      }, [trades]);
+
+      const cards = [
+        { label: 'Trades (24h)', value: stats.count, icon: '\u{1F4CA}' },
+        { label: 'Volume (24h)', value: usd(stats.volume), icon: '\u{1F4B0}' },
+        { label: 'Most Active', value: stats.mostActive ? `${stats.mostActive[0]} (${stats.mostActive[1]})` : '-', icon: '\u{1F525}' },
+        { label: 'Biggest Trade', value: stats.biggest ? usd(stats.biggest.size) : '-', icon: '\u{1F3AF}' },
+      ];
+
+      return (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+          {cards.map((c, i) => (
+            <div key={i} className="bg-surface border border-border rounded-lg px-4 py-3">
+              <div className="text-xs text-gray-500 mb-1">{c.icon} {c.label}</div>
+              <div className="text-lg font-semibold text-white truncate">{c.value}</div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // =========================================================================
+    // Tab Bar
+    // =========================================================================
+    function TabBar({ tab, setTab, tradeCount, walletCount, alertCount }) {
+      const tabs = [
+        { id: 'feed',     label: 'Live Activity', count: tradeCount },
+        { id: 'wallets',  label: 'Wallets',       count: walletCount },
+        { id: 'discover', label: 'Discover',      count: null },
+        { id: 'alerts',   label: 'Alerts',        count: alertCount },
+      ];
+      return (
+        <div className="flex gap-1 mb-5 bg-surface rounded-lg p-1 border border-border w-fit">
+          {tabs.map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                tab === t.id ? 'bg-brand text-black' : 'text-gray-400 hover:text-gray-200'
+              }`}>
+              {t.label}
+              {t.count != null && <span className={`ml-1.5 text-xs ${tab === t.id ? 'text-black/60' : 'text-gray-600'}`}>{t.count}</span>}
+            </button>
+          ))}
+        </div>
+      );
+    }
+
+    // =========================================================================
+    // Activity Feed
+    // =========================================================================
+    function ActivityFeed({ trades, wallets }) {
+      const [filterWallet, setFilterWallet] = useState('all');
+      const [filterMinSize, setFilterMinSize] = useState('');
+
+      const filtered = useMemo(() => {
+        let list = trades;
+        if (filterWallet !== 'all') list = list.filter(t => t.wallet_id === filterWallet);
+        const minSize = parseFloat(filterMinSize);
+        if (minSize > 0) list = list.filter(t => (parseFloat(t.size) || 0) >= minSize);
+        return list;
+      }, [trades, filterWallet, filterMinSize]);
+
+      return (
+        <div className="fade-in">
+          {/* Filters */}
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <select value={filterWallet} onChange={e => setFilterWallet(e.target.value)}
+              className="bg-surface border border-border text-gray-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-brand">
+              <option value="all">All Wallets</option>
+              {wallets.map(w => (
+                <option key={w.id} value={w.id}>{w.nickname || shortAddr(w.address)}</option>
+              ))}
+            </select>
+            <input type="number" placeholder="Min size ($)" value={filterMinSize} onChange={e => setFilterMinSize(e.target.value)}
+              className="bg-surface border border-border text-gray-300 text-sm rounded-lg px-3 py-2 w-36 focus:outline-none focus:border-brand" />
+            <span className="text-xs text-gray-500">{filtered.length} trade{filtered.length !== 1 ? 's' : ''}</span>
+            <span className="text-xs text-gray-600 ml-auto">Auto-refreshes every 30s</span>
+          </div>
+
+          {/* Trade list */}
+          {filtered.length === 0 ? (
+            <div className="bg-surface border border-border rounded-lg p-12 text-center text-gray-500">
+              No trades yet. Add wallets and wait for the poller to pick up activity.
+            </div>
+          ) : (
+            <div className="bg-surface border border-border rounded-lg overflow-hidden">
+              <div className="overflow-x-auto scrollbar-thin">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-xs text-gray-500 uppercase">
+                      <th className="px-4 py-3 text-left font-medium">Time</th>
+                      <th className="px-4 py-3 text-left font-medium">Wallet</th>
+                      <th className="px-4 py-3 text-left font-medium">Market</th>
+                      <th className="px-4 py-3 text-left font-medium">Action</th>
+                      <th className="px-4 py-3 text-right font-medium">Size</th>
+                      <th className="px-4 py-3 text-right font-medium">Price</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map(trade => {
+                      const isBuy = trade.side === 'BUY';
+                      return (
+                        <tr key={trade.id} className="border-b border-border/50 hover:bg-surfaceLight transition-colors">
+                          <td className="px-4 py-3 text-gray-400 whitespace-nowrap">{timeAgo(trade.timestamp)}</td>
+                          <td className="px-4 py-3 font-medium text-white whitespace-nowrap">
+                            {trade.tracked_wallets?.nickname || trade.tracked_wallets?.username || shortAddr(trade.tracked_wallets?.address)}
+                          </td>
+                          <td className="px-4 py-3 max-w-xs truncate">
+                            {trade.market_slug ? (
+                              <a href={`https://polymarket.com/event/${trade.market_slug}`} target="_blank" rel="noopener"
+                                className="text-gray-300 hover:text-brand transition-colors">
+                                {trade.market_question}
+                              </a>
+                            ) : trade.market_question}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-semibold ${
+                              isBuy ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
+                            }`}>
+                              {isBuy ? '\u25B2' : '\u25BC'} {trade.side} {trade.outcome}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right font-mono text-white whitespace-nowrap">{usd(trade.size)}</td>
+                          <td className="px-4 py-3 text-right font-mono text-gray-400 whitespace-nowrap">{pct(trade.price)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // =========================================================================
+    // Wallets Panel
+    // =========================================================================
+    function WalletsPanel({ wallets, onRefresh, onViewStats }) {
+      const [showForm, setShowForm] = useState(false);
+      const [form, setForm] = useState({ address: '', nickname: '', notes: '' });
+      const [submitting, setSubmitting] = useState(false);
+      const [error, setError] = useState('');
+
+      const handleAdd = async (e) => {
+        e.preventDefault();
+        setSubmitting(true);
+        setError('');
+        try {
+          const res = await fetch('/api/wallets/add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(form),
+          });
+          const data = await res.json();
+          if (!res.ok) { setError(data.error || 'Failed'); setSubmitting(false); return; }
+          setForm({ address: '', nickname: '', notes: '' });
+          setShowForm(false);
+          onRefresh();
+        } catch { setError('Network error'); }
+        setSubmitting(false);
+      };
+
+      const toggleActive = async (wallet) => {
+        await api.patch(`/api/wallets/${wallet.id}`, { is_active: !wallet.is_active });
+        onRefresh();
+      };
+
+      const handleDelete = async (id) => {
+        if (!confirm('Remove this wallet and all its trades?')) return;
+        await api.del(`/api/wallets/${id}`);
+        onRefresh();
+      };
+
+      return (
+        <div className="fade-in space-y-4">
+          {/* Add wallet */}
+          <div className="bg-surface border border-border rounded-lg p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-white font-semibold">Tracked Wallets</h2>
+              <button onClick={() => setShowForm(!showForm)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  showForm ? 'bg-gray-700 text-gray-300' : 'bg-brand text-black hover:bg-brandHover'
+                }`}>
+                {showForm ? 'Cancel' : '+ Add Wallet'}
+              </button>
+            </div>
+
+            {showForm && (
+              <form onSubmit={handleAdd} className="bg-bg rounded-lg p-4 mb-4 space-y-3 border border-border">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <input placeholder="Wallet address (0x...)" value={form.address} required
+                    onChange={e => setForm({ ...form, address: e.target.value })}
+                    className="bg-surface border border-border text-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand" />
+                  <input placeholder="Nickname (e.g. distinct-baguette)" value={form.nickname}
+                    onChange={e => setForm({ ...form, nickname: e.target.value })}
+                    className="bg-surface border border-border text-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand" />
+                </div>
+                <input placeholder="Notes (optional)" value={form.notes}
+                  onChange={e => setForm({ ...form, notes: e.target.value })}
+                  className="w-full bg-surface border border-border text-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand" />
+                {error && <p className="text-red-400 text-sm">{error}</p>}
+                <button type="submit" disabled={submitting}
+                  className="bg-brand text-black px-5 py-2 rounded-lg text-sm font-medium hover:bg-brandHover disabled:opacity-50">
+                  {submitting ? 'Adding...' : 'Add Wallet'}
+                </button>
+              </form>
+            )}
+          </div>
+
+          {/* Wallet cards */}
+          {wallets.length === 0 ? (
+            <div className="bg-surface border border-border rounded-lg p-12 text-center text-gray-500">
+              No wallets tracked yet. Add one above to start monitoring.
+            </div>
+          ) : (
+            <div className="grid gap-3">
+              {wallets.map(w => (
+                <div key={w.id} className="bg-surface border border-border rounded-lg p-4 flex items-center gap-4">
+                  {/* Status dot */}
+                  <div className={`w-3 h-3 rounded-full flex-shrink-0 ${w.is_active ? 'bg-green-500' : 'bg-gray-600'}`}></div>
+
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-white font-medium">{w.nickname || 'Unnamed'}</span>
+                      {w.username && <span className="text-gray-500 text-sm">@{w.username}</span>}
+                    </div>
+                    <div className="flex items-center gap-3 mt-1">
+                      <span className="font-mono text-xs text-gray-500">{shortAddr(w.address)}</span>
+                      <a href={`https://polymarket.com/profile/${w.address}`} target="_blank" rel="noopener"
+                        className="text-xs text-brand hover:underline">
+                        View Profile &#x2197;
+                      </a>
+                      <span className="text-xs text-gray-600">Added {timeAgo(w.created_at)}</span>
+                    </div>
+                    {w.notes && <p className="text-xs text-gray-500 mt-1">{w.notes}</p>}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button onClick={() => onViewStats(w.id)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors">
+                      Stats
+                    </button>
+                    <button onClick={() => toggleActive(w)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                        w.is_active ? 'bg-green-500/10 text-green-400 hover:bg-green-500/20' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                      }`}>
+                      {w.is_active ? 'Active' : 'Paused'}
+                    </button>
+                    <button onClick={() => handleDelete(w.id)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors">
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // =========================================================================
+    // Alerts Panel
+    // =========================================================================
+    function AlertsPanel({ alerts, onRefresh }) {
+      const [testing, setTesting] = useState(false);
+      const [testResult, setTestResult] = useState('');
+
+      const sendTest = async () => {
+        setTesting(true);
+        setTestResult('');
+        try {
+          const res = await fetch('/api/alerts/test', { method: 'POST' });
+          const data = await res.json();
+          setTestResult(res.ok ? 'Test alert sent! Check Telegram.' : (data.error || 'Failed'));
+        } catch { setTestResult('Network error'); }
+        setTesting(false);
+      };
+
+      return (
+        <div className="fade-in space-y-4">
+          {/* Test alert */}
+          <div className="bg-surface border border-border rounded-lg p-4 flex items-center justify-between">
+            <div>
+              <h2 className="text-white font-semibold">Telegram Alerts</h2>
+              <p className="text-sm text-gray-500 mt-0.5">Alerts fire for trades &ge; the minimum size threshold</p>
+            </div>
+            <div className="flex items-center gap-3">
+              {testResult && (
+                <span className={`text-sm ${testResult.includes('sent') ? 'text-green-400' : 'text-red-400'}`}>
+                  {testResult}
+                </span>
+              )}
+              <button onClick={sendTest} disabled={testing}
+                className="bg-brand text-black px-4 py-2 rounded-lg text-sm font-medium hover:bg-brandHover disabled:opacity-50">
+                {testing ? 'Sending...' : 'Send Test Alert'}
+              </button>
+            </div>
+          </div>
+
+          {/* Alert history */}
+          {alerts.length === 0 ? (
+            <div className="bg-surface border border-border rounded-lg p-12 text-center text-gray-500">
+              No alerts sent yet. Alerts trigger when tracked wallets make trades above the size threshold.
+            </div>
+          ) : (
+            <div className="bg-surface border border-border rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-xs text-gray-500 uppercase">
+                    <th className="px-4 py-3 text-left font-medium">Sent</th>
+                    <th className="px-4 py-3 text-left font-medium">Market</th>
+                    <th className="px-4 py-3 text-left font-medium">Action</th>
+                    <th className="px-4 py-3 text-right font-medium">Size</th>
+                    <th className="px-4 py-3 text-left font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {alerts.map(a => (
+                    <tr key={a.id} className="border-b border-border/50 hover:bg-surfaceLight transition-colors">
+                      <td className="px-4 py-3 text-gray-400 whitespace-nowrap">{timeAgo(a.sent_at)}</td>
+                      <td className="px-4 py-3 max-w-xs truncate">{a.trades?.market_question || '-'}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {a.trades?.side && (
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold ${
+                            a.trades.side === 'BUY' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
+                          }`}>
+                            {a.trades.side} {a.trades.outcome}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono text-white whitespace-nowrap">{a.trades?.size ? usd(a.trades.size) : '-'}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                          a.status === 'sent' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
+                        }`}>
+                          {a.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // =========================================================================
+    // Discover Panel
+    // =========================================================================
+    function DiscoverPanel({ onRefresh }) {
+      const [whales, setWhales] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [trackingAddr, setTrackingAddr] = useState(null);
+      const [filterTag, setFilterTag] = useState('all');
+
+      useEffect(() => {
+        api.get('/api/discover/top-traders')
+          .then(setWhales)
+          .catch(console.error)
+          .finally(() => setLoading(false));
+      }, []);
+
+      const trackWhale = async (whale) => {
+        setTrackingAddr(whale.address);
+        try {
+          const res = await fetch('/api/wallets/add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ address: whale.address, nickname: whale.username, notes: whale.notes }),
+          });
+          if (res.ok) {
+            setWhales(prev => prev.map(w => w.address === whale.address ? { ...w, isTracked: true } : w));
+            onRefresh();
+          } else {
+            const err = await res.json();
+            alert(err.error || 'Failed to track');
+          }
+        } catch { alert('Network error'); }
+        setTrackingAddr(null);
+      };
+
+      const allTags = useMemo(() => {
+        const tags = new Set();
+        whales.forEach(w => (w.tags || []).forEach(t => tags.add(t)));
+        return Array.from(tags).sort();
+      }, [whales]);
+
+      const filtered = filterTag === 'all' ? whales : whales.filter(w => (w.tags || []).includes(filterTag));
+
+      if (loading) {
+        return (
+          <div className="flex items-center justify-center py-20">
+            <div className="w-8 h-8 border-2 border-brand border-t-transparent rounded-full animate-spin"></div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="fade-in space-y-4">
+          <div className="bg-surface border border-border rounded-lg p-4">
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="text-white font-semibold">Discover Whale Wallets</h2>
+              <span className="text-xs text-gray-500">Curated list &mdash; no public leaderboard API exists</span>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">
+              Notable Polymarket traders identified through on-chain analysis and community research.
+              Click "Track" to start monitoring their trades.
+            </p>
+
+            {/* Tag filter */}
+            <div className="flex gap-2 mb-4 flex-wrap">
+              <button onClick={() => setFilterTag('all')}
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${filterTag === 'all' ? 'bg-brand text-black' : 'bg-surfaceLight text-gray-400 hover:text-gray-200'}`}>
+                All
+              </button>
+              {allTags.map(tag => (
+                <button key={tag} onClick={() => setFilterTag(tag)}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${filterTag === tag ? 'bg-brand text-black' : 'bg-surfaceLight text-gray-400 hover:text-gray-200'}`}>
+                  {tag}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-3">
+            {filtered.map(whale => (
+              <div key={whale.address} className="bg-surface border border-border rounded-lg p-4 flex items-center gap-4">
+                {/* Avatar placeholder */}
+                <div className="w-10 h-10 rounded-full bg-surfaceLight border border-border flex items-center justify-center text-lg flex-shrink-0">
+                  {'\u{1F40B}'}
+                </div>
+
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-white font-medium">{whale.username}</span>
+                    {whale.pseudonym && <span className="text-gray-500 text-sm">({whale.pseudonym})</span>}
+                  </div>
+                  <p className="text-sm text-gray-400 mt-0.5">{whale.notes}</p>
+                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                    {(whale.tags || []).map(tag => (
+                      <span key={tag} className="px-2 py-0.5 rounded-full bg-surfaceLight text-gray-500 text-xs">{tag}</span>
+                    ))}
+                    <span className="font-mono text-xs text-gray-600">{shortAddr(whale.address)}</span>
+                    <a href={`https://polymarket.com/profile/${whale.address}`} target="_blank" rel="noopener"
+                      className="text-xs text-brand hover:underline">
+                      Profile &#x2197;
+                    </a>
+                  </div>
+                </div>
+
+                {/* Track button */}
+                <div className="flex-shrink-0">
+                  {whale.isTracked ? (
+                    <span className="px-4 py-2 rounded-lg text-xs font-medium bg-green-500/10 text-green-400">
+                      &#x2713; Tracking
+                    </span>
+                  ) : (
+                    <button onClick={() => trackWhale(whale)} disabled={trackingAddr === whale.address}
+                      className="px-4 py-2 rounded-lg text-sm font-medium bg-brand text-black hover:bg-brandHover disabled:opacity-50 transition-colors">
+                      {trackingAddr === whale.address ? 'Adding...' : '+ Track'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // =========================================================================
+    // Wallet Stats Modal
+    // =========================================================================
+    function WalletStatsModal({ walletId, onClose }) {
+      const [stats, setStats] = useState(null);
+      const [loading, setLoading] = useState(true);
+
+      useEffect(() => {
+        setLoading(true);
+        api.get(`/api/wallets/${walletId}/stats`)
+          .then(setStats)
+          .catch(console.error)
+          .finally(() => setLoading(false));
+      }, [walletId]);
+
+      const maxHour = stats ? Math.max(...stats.hourlyActivity, 1) : 1;
+
+      return (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
+          <div className="bg-bg border border-border rounded-xl max-w-2xl w-full max-h-[85vh] overflow-y-auto scrollbar-thin" onClick={e => e.stopPropagation()}>
+            {loading ? (
+              <div className="flex items-center justify-center py-20">
+                <div className="w-8 h-8 border-2 border-brand border-t-transparent rounded-full animate-spin"></div>
+              </div>
+            ) : !stats ? (
+              <div className="p-8 text-center text-gray-500">Failed to load stats</div>
+            ) : (
+              <>
+                {/* Header */}
+                <div className="flex items-center justify-between p-5 border-b border-border">
+                  <div>
+                    <h2 className="text-lg font-bold text-white">{stats.wallet.nickname || 'Wallet'} Stats</h2>
+                    <span className="font-mono text-xs text-gray-500">{stats.wallet.address}</span>
+                  </div>
+                  <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">&times;</button>
+                </div>
+
+                {/* Stat cards */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-5">
+                  {[
+                    { label: 'Total Trades', value: stats.totalTrades },
+                    { label: 'Total Volume', value: usd(stats.totalVolume) },
+                    { label: 'Avg Size', value: usd(stats.avgTradeSize) },
+                    { label: 'High Conviction', value: stats.highConvictionPct ? `${stats.highConvictionPct}%` : 'N/A' },
+                  ].map((c, i) => (
+                    <div key={i} className="bg-surface border border-border rounded-lg px-3 py-2.5">
+                      <div className="text-xs text-gray-500">{c.label}</div>
+                      <div className="text-lg font-semibold text-white">{c.value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Buy/Sell breakdown */}
+                <div className="px-5 pb-4">
+                  <div className="flex items-center gap-4 text-sm mb-2">
+                    <span className="text-green-400">BUY: {stats.buyCount} ({usd(stats.buyVolume)})</span>
+                    <span className="text-red-400">SELL: {stats.sellCount} ({usd(stats.sellVolume)})</span>
+                  </div>
+                  {stats.totalTrades > 0 && (
+                    <div className="h-2 rounded-full bg-surface overflow-hidden flex">
+                      <div className="bg-green-500 h-full" style={{ width: `${(stats.buyCount / stats.totalTrades * 100)}%` }}></div>
+                      <div className="bg-red-500 h-full" style={{ width: `${(stats.sellCount / stats.totalTrades * 100)}%` }}></div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Hourly activity */}
+                {stats.totalTrades > 0 && (
+                  <div className="px-5 pb-4">
+                    <h3 className="text-sm font-medium text-gray-400 mb-2">Activity by Hour (UTC)</h3>
+                    <div className="flex items-end gap-px h-16">
+                      {stats.hourlyActivity.map((count, hour) => (
+                        <div key={hour} className="flex-1 flex flex-col items-center group relative">
+                          <div className="w-full bg-brand/60 rounded-t-sm transition-all hover:bg-brand"
+                            style={{ height: `${(count / maxHour) * 100}%`, minHeight: count > 0 ? '2px' : '0' }}>
+                          </div>
+                          {hour % 6 === 0 && <span className="text-gray-600 text-[9px] mt-1">{hour}h</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Top markets */}
+                {stats.topMarkets.length > 0 && (
+                  <div className="px-5 pb-5">
+                    <h3 className="text-sm font-medium text-gray-400 mb-2">Top Markets by Volume</h3>
+                    <div className="space-y-2">
+                      {stats.topMarkets.slice(0, 5).map((m, i) => (
+                        <div key={i} className="flex items-center justify-between text-sm bg-surface rounded-lg px-3 py-2">
+                          <span className="text-gray-300 truncate flex-1 mr-4">
+                            {m.slug ? (
+                              <a href={`https://polymarket.com/event/${m.slug}`} target="_blank" rel="noopener"
+                                className="hover:text-brand transition-colors">{m.question}</a>
+                            ) : m.question}
+                          </span>
+                          <div className="flex items-center gap-3 flex-shrink-0">
+                            <span className="text-gray-500 text-xs">{m.count} trades</span>
+                            <span className="text-white font-mono">{usd(m.volume)}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Time range */}
+                {stats.firstTrade && (
+                  <div className="px-5 pb-5 text-xs text-gray-600">
+                    Tracking since {new Date(stats.firstTrade).toLocaleDateString()} &mdash; Last trade {timeAgo(stats.lastTrade)}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // =========================================================================
+    // Mount
+    // =========================================================================
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
