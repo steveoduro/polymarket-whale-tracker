@@ -20,4 +20,4 @@ services:
       - key: POLL_INTERVAL_MS
         value: "30000"
       - key: ALERT_MIN_SIZE
-        value: "10"
+        value: "100"
