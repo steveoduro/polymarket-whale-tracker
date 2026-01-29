@@ -1,15 +1,21 @@
 {
   "name": "polymarket-whale-tracker",
-  "version": "1.0.0",
-  "description": "Track whale wallets on Polymarket and get alerts",
+  "version": "2.0.0",
+  "description": "Track whale wallets on Polymarket and copy trades",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "copier": "node run-copier.js",
+    "copier:live": "node run-copier.js --live",
+    "copier:check": "node run-copier.js --check",
+    "copier:status": "node run-copier.js --status"
   },
   "dependencies": {
+    "@polymarket/clob-client": "^4.0.0",
     "@supabase/supabase-js": "^2.39.0",
     "dotenv": "^16.3.1",
+    "ethers": "^6.9.0",
     "express": "^4.18.2"
   },
   "engines": {
