@@ -70,6 +70,24 @@ const KNOWN_WHALES = [
     tags: ['crypto', 'high-frequency'],
   },
   {
+    address: '0x38cc1d1f95d12039324809d8bb6ca6da6cbef88e',
+    username: 'NoonienSoong',
+    notes: '92% win rate, weather markets specialist',
+    tags: ['weather', 'high-win-rate'],
+  },
+  {
+    address: '0x08cf0b0fec3d42d9920bb0dfbc49fde635088cbc',
+    username: 'HondaCivic',
+    notes: '67% win rate, weather markets',
+    tags: ['weather'],
+  },
+  {
+    address: '0x2ec681d5cbf2ba6d1e8f0e87b2e6026b0bc438c8',
+    username: 'micro88so8z',
+    notes: '100% win rate, BTC markets specialist',
+    tags: ['crypto', 'btc', 'high-win-rate'],
+  },
+  {
     address: '0x1b1cbe20e69e29c475e5f57fbb0d8f19f7cc7878',
     username: 'Theo4',
     notes: 'Largest Polymarket trader, $60M+ portfolio, political + crypto markets',
@@ -870,6 +888,139 @@ app.get('/api/alerts', async (req, res) => {
     res.json(data);
   } catch (err) {
     log('error', 'Error fetching alerts', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =============================================================================
+// COPY TRADING STATS (Phase 2)
+// =============================================================================
+
+// Get per-whale performance
+app.get('/api/copier/whale-performance', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('my_trades')
+      .select('copied_from_whale, copied_from_address, pnl, size, status, created_at')
+      .in('status', ['paper', 'filled', 'pending']);
+
+    if (error) throw error;
+
+    // Aggregate by whale
+    const whaleStats = {};
+    for (const trade of data || []) {
+      const whale = trade.copied_from_whale || 'unknown';
+      if (!whaleStats[whale]) {
+        whaleStats[whale] = {
+          whale,
+          address: trade.copied_from_address,
+          totalTrades: 0,
+          wins: 0,
+          losses: 0,
+          pending: 0,
+          totalVolume: 0,
+          totalPnL: 0,
+          firstTrade: trade.created_at,
+          lastTrade: trade.created_at,
+        };
+      }
+      const stats = whaleStats[whale];
+      stats.totalTrades++;
+      stats.totalVolume += parseFloat(trade.size) || 0;
+      if (trade.pnl !== null) {
+        stats.totalPnL += parseFloat(trade.pnl) || 0;
+        if (trade.pnl > 0) stats.wins++;
+        else if (trade.pnl < 0) stats.losses++;
+      } else {
+        stats.pending++;
+      }
+      if (trade.created_at < stats.firstTrade) stats.firstTrade = trade.created_at;
+      if (trade.created_at > stats.lastTrade) stats.lastTrade = trade.created_at;
+    }
+
+    // Calculate win rates and format
+    const results = Object.values(whaleStats).map(s => ({
+      ...s,
+      winRate: s.wins + s.losses > 0
+        ? ((s.wins / (s.wins + s.losses)) * 100).toFixed(1) + '%'
+        : 'N/A',
+      avgPnL: s.wins + s.losses > 0
+        ? (s.totalPnL / (s.wins + s.losses)).toFixed(2)
+        : 0,
+    }));
+
+    // Sort by P&L descending
+    results.sort((a, b) => b.totalPnL - a.totalPnL);
+
+    res.json(results);
+  } catch (err) {
+    log('error', 'Error fetching whale performance', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get recent copy trades
+app.get('/api/copier/trades', async (req, res) => {
+  try {
+    const { limit = 50, whale } = req.query;
+
+    let query = supabase
+      .from('my_trades')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(parseInt(limit));
+
+    if (whale) {
+      query = query.eq('copied_from_whale', whale);
+    }
+
+    const { data, error } = await query;
+
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    log('error', 'Error fetching copy trades', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get copy trading summary
+app.get('/api/copier/summary', async (req, res) => {
+  try {
+    const { data: trades, error } = await supabase
+      .from('my_trades')
+      .select('pnl, size, status')
+      .in('status', ['paper', 'filled', 'pending']);
+
+    if (error) throw error;
+
+    let totalTrades = 0, wins = 0, losses = 0, pending = 0;
+    let totalVolume = 0, totalPnL = 0;
+
+    for (const t of trades || []) {
+      totalTrades++;
+      totalVolume += parseFloat(t.size) || 0;
+      if (t.pnl !== null) {
+        totalPnL += parseFloat(t.pnl) || 0;
+        if (t.pnl > 0) wins++;
+        else if (t.pnl < 0) losses++;
+      } else {
+        pending++;
+      }
+    }
+
+    res.json({
+      totalTrades,
+      wins,
+      losses,
+      pending,
+      totalVolume,
+      totalPnL,
+      winRate: wins + losses > 0 ? ((wins / (wins + losses)) * 100).toFixed(1) + '%' : 'N/A',
+      avgPnL: wins + losses > 0 ? (totalPnL / (wins + losses)).toFixed(2) : 0,
+    });
+  } catch (err) {
+    log('error', 'Error fetching copier summary', { error: err.message });
     res.status(500).json({ error: err.message });
   }
 });

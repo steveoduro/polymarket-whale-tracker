@@ -224,6 +224,31 @@ async function showStatus() {
     .in('status', ['paper', 'filled'])
     .is('resolved_outcome', null);
 
+  // Get per-whale performance
+  const { data: whalePerf } = await supabase
+    .from('my_trades')
+    .select('copied_from_whale, pnl, status')
+    .in('status', ['paper', 'filled', 'pending']);
+
+  const whaleStats = new Map();
+  if (whalePerf) {
+    for (const t of whalePerf) {
+      const whale = t.copied_from_whale || 'unknown';
+      if (!whaleStats.has(whale)) {
+        whaleStats.set(whale, { trades: 0, wins: 0, losses: 0, pending: 0, pnl: 0 });
+      }
+      const stats = whaleStats.get(whale);
+      stats.trades++;
+      if (t.pnl !== null) {
+        stats.pnl += parseFloat(t.pnl) || 0;
+        if (t.pnl > 0) stats.wins++;
+        else if (t.pnl < 0) stats.losses++;
+      } else {
+        stats.pending++;
+      }
+    }
+  }
+
   console.log('Today\'s Stats:');
   if (dailyStats) {
     console.log(`  Trades:     ${dailyStats.trades_count || 0}`);
@@ -233,12 +258,25 @@ async function showStatus() {
     console.log('  No trades today');
   }
 
-  console.log('\n=== Paper Trading P&L ===\n');
+  console.log('\n=== Overall P&L ===\n');
   console.log(`  Resolved:   ${wins + losses} trades`);
   console.log(`  Wins:       ${wins} (${wins + losses > 0 ? ((wins / (wins + losses)) * 100).toFixed(1) : 0}%)`);
   console.log(`  Losses:     ${losses}`);
   console.log(`  Total P&L:  $${totalPnL.toFixed(2)}`);
   console.log(`  Pending:    ${pendingCount || 0} trades awaiting resolution`);
+
+  // Per-whale breakdown
+  if (whaleStats.size > 0) {
+    console.log('\n=== Performance by Whale ===\n');
+    console.log('  Whale                 Trades  Wins  Losses  Pending  Win%     P&L');
+    console.log('  ' + '-'.repeat(70));
+    for (const [whale, stats] of whaleStats) {
+      const resolved = stats.wins + stats.losses;
+      const winRate = resolved > 0 ? ((stats.wins / resolved) * 100).toFixed(0) : '-';
+      const pnlStr = stats.pnl >= 0 ? `+$${stats.pnl.toFixed(2)}` : `-$${Math.abs(stats.pnl).toFixed(2)}`;
+      console.log(`  ${whale.padEnd(20)} ${String(stats.trades).padStart(6)}  ${String(stats.wins).padStart(4)}  ${String(stats.losses).padStart(6)}  ${String(stats.pending).padStart(7)}  ${String(winRate + '%').padStart(4)}  ${pnlStr.padStart(8)}`);
+    }
+  }
 
   console.log(`\nTotal Trades (all time): ${totalTrades || 0}`);
 
@@ -246,6 +284,7 @@ async function showStatus() {
     console.log('\nRecent Trades:');
     for (const trade of recentTrades.slice(0, 5)) {
       const time = new Date(trade.created_at).toLocaleString();
+      const whale = trade.copied_from_whale || '?';
       let statusIcon = '⏳';
       if (trade.pnl !== null) {
         statusIcon = trade.pnl > 0 ? '✅' : '❌';
@@ -255,8 +294,8 @@ async function showStatus() {
         statusIcon = '💥';
       }
       const pnlStr = trade.pnl !== null ? ` | P&L: $${parseFloat(trade.pnl).toFixed(2)}` : '';
-      console.log(`  ${statusIcon} ${time} | ${trade.side} ${trade.outcome} @ ${trade.price} | $${trade.size}${pnlStr}`);
-      console.log(`     ${trade.market_question?.slice(0, 60)}...`);
+      console.log(`  ${statusIcon} [${whale}] ${trade.side} ${trade.outcome} @ ${trade.price} | $${trade.size}${pnlStr}`);
+      console.log(`     ${trade.market_question?.slice(0, 55)}...`);
     }
   }
 
