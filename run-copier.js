@@ -17,6 +17,7 @@ require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 const { TradeCopier } = require('./lib/trade-copier');
 const { PolymarketAPI } = require('./lib/polymarket-api');
+const { ResolutionTracker } = require('./lib/resolution-tracker');
 
 // =============================================================================
 // CONFIGURATION
@@ -202,6 +203,27 @@ async function showStatus() {
     .from('my_trades')
     .select('*', { count: 'exact', head: true });
 
+  // Get P&L summary
+  const { data: resolvedTrades } = await supabase
+    .from('my_trades')
+    .select('pnl, outcome, resolved_outcome')
+    .not('pnl', 'is', null);
+
+  let wins = 0, losses = 0, totalPnL = 0;
+  if (resolvedTrades) {
+    for (const t of resolvedTrades) {
+      if (t.pnl > 0) wins++;
+      else if (t.pnl < 0) losses++;
+      totalPnL += parseFloat(t.pnl) || 0;
+    }
+  }
+
+  const { count: pendingCount } = await supabase
+    .from('my_trades')
+    .select('*', { count: 'exact', head: true })
+    .in('status', ['paper', 'filled'])
+    .is('resolved_outcome', null);
+
   console.log('Today\'s Stats:');
   if (dailyStats) {
     console.log(`  Trades:     ${dailyStats.trades_count || 0}`);
@@ -211,14 +233,30 @@ async function showStatus() {
     console.log('  No trades today');
   }
 
+  console.log('\n=== Paper Trading P&L ===\n');
+  console.log(`  Resolved:   ${wins + losses} trades`);
+  console.log(`  Wins:       ${wins} (${wins + losses > 0 ? ((wins / (wins + losses)) * 100).toFixed(1) : 0}%)`);
+  console.log(`  Losses:     ${losses}`);
+  console.log(`  Total P&L:  $${totalPnL.toFixed(2)}`);
+  console.log(`  Pending:    ${pendingCount || 0} trades awaiting resolution`);
+
   console.log(`\nTotal Trades (all time): ${totalTrades || 0}`);
 
   if (recentTrades && recentTrades.length > 0) {
     console.log('\nRecent Trades:');
     for (const trade of recentTrades.slice(0, 5)) {
       const time = new Date(trade.created_at).toLocaleString();
-      const status = trade.status === 'paper' ? '📝' : trade.status === 'filled' ? '✅' : trade.status === 'failed' ? '❌' : '⏳';
-      console.log(`  ${status} ${time} | ${trade.side} ${trade.outcome} @ ${trade.price} | $${trade.size} | ${trade.market_question?.slice(0, 40)}...`);
+      let statusIcon = '⏳';
+      if (trade.pnl !== null) {
+        statusIcon = trade.pnl > 0 ? '✅' : '❌';
+      } else if (trade.status === 'paper') {
+        statusIcon = '📝';
+      } else if (trade.status === 'failed') {
+        statusIcon = '💥';
+      }
+      const pnlStr = trade.pnl !== null ? ` | P&L: $${parseFloat(trade.pnl).toFixed(2)}` : '';
+      console.log(`  ${statusIcon} ${time} | ${trade.side} ${trade.outcome} @ ${trade.price} | $${trade.size}${pnlStr}`);
+      console.log(`     ${trade.market_question?.slice(0, 60)}...`);
     }
   }
 
@@ -260,6 +298,13 @@ async function runCopier(liveMode = false) {
 
   await copier.initialize();
 
+  // Initialize resolution tracker for P&L tracking
+  const resolutionTracker = new ResolutionTracker({
+    supabase,
+    pollIntervalMs: 60000, // Check for resolutions every minute
+    log: log,
+  });
+
   // Send startup alert
   await sendTelegramAlert(
     `🤖 *Trade Copier Started*\n` +
@@ -271,15 +316,24 @@ async function runCopier(liveMode = false) {
   // Start polling
   copier.startPolling(CONFIG.pollIntervalMs);
 
+  // Start resolution tracker
+  resolutionTracker.start();
+  log('info', 'Resolution tracker started (checking P&L every 60s)');
+
   // Status logging every minute
   const statusInterval = setInterval(() => {
-    const stats = copier.getStats();
+    const copierStats = copier.getStats();
+    const resolutionStats = resolutionTracker.getStats();
     log('info', 'Status update', {
-      checked: stats.tradesChecked,
-      matched: stats.tradesMatched,
-      copied: stats.tradesCopied,
-      skipped: stats.tradesSkipped,
-      errors: stats.errors,
+      checked: copierStats.tradesChecked,
+      matched: copierStats.tradesMatched,
+      copied: copierStats.tradesCopied,
+      skipped: copierStats.tradesSkipped,
+      errors: copierStats.errors,
+      resolved: resolutionStats.tradesResolved,
+      wins: resolutionStats.wins,
+      losses: resolutionStats.losses,
+      pnl: `$${resolutionStats.totalPnL.toFixed(2)}`,
     });
   }, 60000);
 
@@ -288,17 +342,22 @@ async function runCopier(liveMode = false) {
     log('info', `Shutdown signal received: ${signal}`);
     clearInterval(statusInterval);
     copier.stopPolling();
+    resolutionTracker.stop();
 
     // Save final state
     if (supabase) {
       await copier.riskManager.saveState(supabase);
     }
 
+    // Get final P&L stats
+    const finalStats = resolutionTracker.getStats();
+
     // Send shutdown alert
     await sendTelegramAlert(
       `🛑 *Trade Copier Stopped*\n` +
       `Trades copied: ${copier.stats.tradesCopied}\n` +
-      `Trades skipped: ${copier.stats.tradesSkipped}`
+      `Resolved: ${finalStats.tradesResolved} (${finalStats.wins}W/${finalStats.losses}L)\n` +
+      `P&L: $${finalStats.totalPnL.toFixed(2)}`
     );
 
     log('info', 'Shutdown complete');
