@@ -1,7 +1,7 @@
 {
   "name": "polymarket-whale-tracker",
-  "version": "2.0.0",
-  "description": "Track whale wallets on Polymarket and copy trades",
+  "version": "3.0.0",
+  "description": "Polymarket whale tracker, copy trader, and weather mispricing bot",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -9,7 +9,11 @@
     "copier": "node run-copier.js",
     "copier:live": "node run-copier.js --live",
     "copier:check": "node run-copier.js --check",
-    "copier:status": "node run-copier.js --status"
+    "copier:status": "node run-copier.js --status",
+    "weather": "node run-weather-bot.js",
+    "weather:live": "node run-weather-bot.js --live",
+    "weather:scan": "node run-weather-bot.js --scan",
+    "weather:status": "node run-weather-bot.js --status"
   },
   "dependencies": {
     "@polymarket/clob-client": "^4.0.0",
