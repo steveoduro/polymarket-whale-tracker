@@ -40,6 +40,11 @@ const CONFIG = {
   MAX_RANGE_PRICE: 0.85,          // Don't buy above 85¢
   HEDGE_RANGES: true,             // Spread across nearby ranges
 
+  // Forecast Arbitrage settings
+  FORECAST_SHIFT_MIN_F: 2,        // Minimum 2°F shift to trigger
+  FORECAST_SHIFT_MIN_C: 1,        // Minimum 1°C shift to trigger
+  FORECAST_COMPARE_HOURS: 2,      // Compare to forecast from 2 hours ago
+
   // Polling - maximize 10k calls/day
   SCAN_INTERVAL_MS: 2 * 60 * 1000,       // Scan every 2 minutes
   RESOLUTION_CHECK_MS: 30 * 60 * 1000,   // Check resolutions every 30 min
@@ -104,10 +109,23 @@ function formatTradeAlert(opportunity, positions) {
   const forecast = opportunity.forecast;
   const totalCost = positions.totalCost.toFixed(2);
   const maxPayout = positions.maxPayout;
+  const strategy = opportunity.strategy || 'range_mispricing';
 
-  let msg = `🌡️ *WEATHER OPPORTUNITY*\n\n`;
+  let msg = strategy === 'forecast_arbitrage'
+    ? `📈 *FORECAST SHIFT DETECTED*\n\n`
+    : `🌡️ *WEATHER OPPORTUNITY*\n\n`;
+
   msg += `📍 ${market.city.toUpperCase()} - ${market.dateStr}\n`;
-  msg += `🎯 Forecast: ${forecast.highC}°C / ${forecast.highF}°F (${forecast.confidence})\n\n`;
+  msg += `🎯 Forecast: ${forecast.highC}°C / ${forecast.highF}°F (${forecast.confidence})\n`;
+
+  // Add shift info for forecast arbitrage
+  if (strategy === 'forecast_arbitrage' && opportunity.forecastShift) {
+    const shift = opportunity.forecastShift;
+    msg += `🔄 Shift: ${shift.shiftF > 0 ? '+' : ''}${shift.shiftF}°F (${shift.direction})\n`;
+    msg += `   Previous: ${shift.previousHighF}°F → Now: ${shift.currentHighF}°F\n`;
+  }
+
+  msg += `\n*Strategy:* ${strategy === 'forecast_arbitrage' ? 'Forecast Arbitrage' : 'Range Mispricing'}\n`;
   msg += `*Market Analysis:*\n`;
   msg += `  Total probability: ${(opportunity.totalProbability * 100).toFixed(1)}%\n`;
   msg += `  Edge: ${opportunity.mispricingPct.toFixed(1)}%\n\n`;
@@ -201,8 +219,9 @@ class WeatherBot {
 
       log('info', `${validMarkets.length} markets match city/date filters`);
 
-      // 3. Check each market for opportunities
-      const opportunities = [];
+      // 3. Check each market for opportunities (BOTH strategies)
+      const rangeMispricingOpps = [];
+      const forecastArbitrageOpps = [];
 
       for (const market of validMarkets) {
         // Skip if we already have a position
@@ -215,30 +234,83 @@ class WeatherBot {
         const forecast = await this.weatherApi.getForecastForDate(market.city, market.dateStr);
         if (!forecast) continue;
 
-        // Analyze for mispricing
-        const opportunity = this.detector.analyzeMarket(market, forecast);
-        if (opportunity) {
-          opportunities.push(opportunity);
+        // Save forecast to history (for future shift detection)
+        await this.weatherApi.saveForecastHistory(this.supabase, forecast);
+
+        // === STRATEGY 1: Range Mispricing ===
+        const mispricingOpp = this.detector.analyzeMarket(market, forecast);
+        if (mispricingOpp) {
+          mispricingOpp.strategy = 'range_mispricing';
+          rangeMispricingOpps.push(mispricingOpp);
+        }
+
+        // === STRATEGY 2: Forecast Arbitrage ===
+        // Get previous forecast from N hours ago
+        const previousForecast = await this.weatherApi.getPreviousForecast(
+          this.supabase,
+          market.city,
+          market.dateStr,
+          CONFIG.FORECAST_COMPARE_HOURS
+        );
+
+        if (previousForecast) {
+          // Check for significant shift
+          const forecastShift = this.weatherApi.compareForecast(forecast, previousForecast, {
+            minShiftF: CONFIG.FORECAST_SHIFT_MIN_F,
+            minShiftC: CONFIG.FORECAST_SHIFT_MIN_C,
+          });
+
+          if (forecastShift) {
+            log('info', 'Forecast shift detected', {
+              city: market.city,
+              date: market.dateStr,
+              shift: `${forecastShift.shiftF}°F (${forecastShift.direction})`,
+              hours: forecastShift.hoursElapsed,
+            });
+
+            const shiftOpp = this.detector.detectForecastShift(market, forecast, forecastShift);
+            if (shiftOpp) {
+              forecastArbitrageOpps.push(shiftOpp);
+            }
+          }
         }
       }
 
-      // 4. Rank and trade opportunities
-      const ranked = this.detector.rankOpportunities(opportunities);
-      log('info', `Found ${ranked.length} profitable opportunities`);
+      // 4. Rank opportunities from both strategies
+      const rankedMispricing = this.detector.rankOpportunities(rangeMispricingOpps);
+      const rankedShifts = this.detector.rankForecastShiftOpportunities(forecastArbitrageOpps);
+
+      log('info', `Strategy 1 (Range Mispricing): ${rankedMispricing.length} profitable opportunities`);
+      log('info', `Strategy 2 (Forecast Arbitrage): ${rankedShifts.length} shift opportunities`);
+
+      // 5. Combine and execute (prioritize forecast shifts as they're time-sensitive)
+      const allOpportunities = [...rankedShifts, ...rankedMispricing];
 
       // Check position limit
       const openCount = await this.trader.getOpenPositionCount();
       const slotsAvailable = CONFIG.MAX_OPEN_POSITIONS - openCount;
 
-      for (const opp of ranked.slice(0, slotsAvailable)) {
+      let executed = 0;
+      const executedMarkets = new Set();
+
+      for (const opp of allOpportunities) {
+        if (executed >= slotsAvailable) break;
+
+        // Don't trade same market twice in one cycle
+        if (executedMarkets.has(opp.market.slug)) continue;
+
         await this.executeOpportunity(opp);
+        executedMarkets.add(opp.market.slug);
+        executed++;
       }
 
       // Log API usage
       const apiStats = this.weatherApi.getStats();
       log('info', 'Scan cycle complete', {
         marketsScanned: validMarkets.length,
-        opportunities: ranked.length,
+        rangeMispricingOpps: rankedMispricing.length,
+        forecastShiftOpps: rankedShifts.length,
+        executed: executed,
         apiCalls: apiStats.requestCount,
       });
 
@@ -349,7 +421,7 @@ async function showStatus() {
   // Get trade stats
   const { data: trades } = await supabase
     .from('weather_paper_trades')
-    .select('status, pnl, cost, city, target_date, range_name')
+    .select('status, pnl, cost, city, target_date, range_name, strategy, forecast_shift_f')
     .order('created_at', { ascending: false });
 
   if (!trades || trades.length === 0) {
@@ -373,12 +445,32 @@ async function showStatus() {
   console.log(`  Total Cost: $${totalCost.toFixed(2)}`);
   console.log(`  ROI: ${totalCost > 0 ? ((totalPnL / totalCost) * 100).toFixed(1) + '%' : 'N/A'}`);
 
+  // Performance by Strategy
+  console.log('\nPerformance by Strategy:');
+  const byStrategy = {};
+  for (const t of trades) {
+    const strat = t.strategy || 'range_mispricing';
+    if (!byStrategy[strat]) byStrategy[strat] = { wins: 0, losses: 0, pnl: 0, cost: 0 };
+    if (t.status === 'won') byStrategy[strat].wins++;
+    if (t.status === 'lost') byStrategy[strat].losses++;
+    byStrategy[strat].pnl += parseFloat(t.pnl) || 0;
+    byStrategy[strat].cost += parseFloat(t.cost) || 0;
+  }
+  for (const [strat, stats] of Object.entries(byStrategy)) {
+    const wr = stats.wins + stats.losses > 0 ? ((stats.wins / (stats.wins + stats.losses)) * 100).toFixed(0) + '%' : '-';
+    const roi = stats.cost > 0 ? ((stats.pnl / stats.cost) * 100).toFixed(1) + '%' : '-';
+    const stratName = strat === 'forecast_arbitrage' ? 'Forecast Arbitrage' : 'Range Mispricing';
+    console.log(`  ${stratName.padEnd(20)} ${stats.wins}W/${stats.losses}L (${wr}) | P&L: $${stats.pnl.toFixed(2)} | ROI: ${roi}`);
+  }
+
   // Recent trades
   console.log('\nRecent Trades:');
   for (const trade of trades.slice(0, 10)) {
     const icon = trade.status === 'won' ? '✅' : trade.status === 'lost' ? '❌' : '⏳';
     const pnlStr = trade.pnl !== null ? ` | P&L: $${parseFloat(trade.pnl).toFixed(2)}` : '';
-    console.log(`  ${icon} ${trade.city} ${trade.target_date} | ${trade.range_name} | $${parseFloat(trade.cost).toFixed(2)}${pnlStr}`);
+    const stratIcon = trade.strategy === 'forecast_arbitrage' ? '📈' : '📊';
+    const shiftStr = trade.forecast_shift_f ? ` [${trade.forecast_shift_f > 0 ? '+' : ''}${trade.forecast_shift_f}°F]` : '';
+    console.log(`  ${icon} ${stratIcon} ${trade.city} ${trade.target_date} | ${trade.range_name}${shiftStr} | $${parseFloat(trade.cost).toFixed(2)}${pnlStr}`);
   }
 
   // By city
@@ -401,6 +493,7 @@ async function showStatus() {
 async function scanOnly() {
   console.log('\n=== Scan Mode (No Trading) ===\n');
 
+  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
   const weatherApi = new WeatherAPI({ log });
   const scanner = new MarketScanner({ log });
   const detector = new MispricingDetector({
@@ -414,7 +507,8 @@ async function scanOnly() {
   console.log(`Found ${markets.length} temperature markets\n`);
 
   const today = new Date();
-  let opportunityCount = 0;
+  let mispricingCount = 0;
+  let shiftCount = 0;
 
   for (const market of markets) {
     if (!CONFIG.ACTIVE_CITIES.includes(market.city)) continue;
@@ -423,9 +517,13 @@ async function scanOnly() {
     const forecast = await weatherApi.getForecastForDate(market.city, market.dateStr);
     if (!forecast) continue;
 
+    // Save forecast to history
+    await weatherApi.saveForecastHistory(supabase, forecast);
+
+    // === STRATEGY 1: Range Mispricing ===
     const opp = detector.analyzeMarket(market, forecast);
     if (opp) {
-      opportunityCount++;
+      mispricingCount++;
       console.log(`\n📊 OPPORTUNITY: ${market.city.toUpperCase()} - ${market.dateStr}`);
       console.log(`   Forecast: ${forecast.highC}°C / ${forecast.highF}°F (${forecast.confidence})`);
       console.log(`   Total Prob: ${(opp.totalProbability * 100).toFixed(1)}%`);
@@ -433,9 +531,40 @@ async function scanOnly() {
       console.log(`   Best Range: ${opp.bestRange.name} @ ${(opp.bestRange.price * 100).toFixed(0)}¢`);
       console.log(`   EV: ${(opp.expectedValue.evPct).toFixed(1)}% per dollar`);
     }
+
+    // === STRATEGY 2: Forecast Arbitrage ===
+    const previousForecast = await weatherApi.getPreviousForecast(
+      supabase,
+      market.city,
+      market.dateStr,
+      CONFIG.FORECAST_COMPARE_HOURS
+    );
+
+    if (previousForecast) {
+      const forecastShift = weatherApi.compareForecast(forecast, previousForecast, {
+        minShiftF: CONFIG.FORECAST_SHIFT_MIN_F,
+        minShiftC: CONFIG.FORECAST_SHIFT_MIN_C,
+      });
+
+      if (forecastShift) {
+        const shiftOpp = detector.detectForecastShift(market, forecast, forecastShift);
+        if (shiftOpp) {
+          shiftCount++;
+          console.log(`\n📈 FORECAST SHIFT: ${market.city.toUpperCase()} - ${market.dateStr}`);
+          console.log(`   Shift: ${forecastShift.shiftF > 0 ? '+' : ''}${forecastShift.shiftF}°F (${forecastShift.direction})`);
+          console.log(`   Previous: ${forecastShift.previousHighF}°F → Now: ${forecastShift.currentHighF}°F`);
+          console.log(`   Hours ago: ${forecastShift.hoursElapsed}`);
+          console.log(`   Best Range: ${shiftOpp.bestRange.name} @ ${(shiftOpp.bestRange.price * 100).toFixed(0)}¢`);
+          console.log(`   EV: ${(shiftOpp.expectedValue.evPct).toFixed(1)}% per dollar`);
+        }
+      }
+    }
   }
 
-  console.log(`\n\nTotal opportunities found: ${opportunityCount}\n`);
+  console.log(`\n${'='.repeat(50)}`);
+  console.log(`Range Mispricing opportunities: ${mispricingCount}`);
+  console.log(`Forecast Arbitrage opportunities: ${shiftCount}`);
+  console.log(`Total opportunities: ${mispricingCount + shiftCount}\n`);
 }
 
 async function resolveOnly() {
