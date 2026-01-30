@@ -45,16 +45,15 @@ const CONFIG = {
   FORECAST_SHIFT_MIN_C: 1,        // Minimum 1°C shift to trigger
   FORECAST_COMPARE_HOURS: 2,      // Compare to forecast from 2 hours ago
 
-  // Polling - maximize 10k calls/day
-  SCAN_INTERVAL_MS: 2 * 60 * 1000,       // Scan every 2 minutes
+  // Polling - optimize for API limits
+  SCAN_INTERVAL_MS: 5 * 60 * 1000,       // Scan every 5 minutes
   RESOLUTION_CHECK_MS: 30 * 60 * 1000,   // Check resolutions every 30 min
 
-  // Cities - all supported
+  // Cities - 12 active Polymarket weather markets
   ACTIVE_CITIES: [
-    'london', 'nyc', 'atlanta', 'miami', 'chicago',
-    'dallas', 'seattle', 'toronto', 'seoul',
-    'buenos aires', 'ankara', 'wellington',
-    'denver', 'phoenix', 'los angeles'
+    'nyc', 'london', 'seoul', 'dallas', 'toronto',
+    'miami', 'buenos aires', 'atlanta', 'chicago',
+    'seattle', 'ankara', 'wellington'
   ],
 
   // Alerts
@@ -487,7 +486,45 @@ async function showStatus() {
     console.log(`  ${city.padEnd(15)} ${stats.wins}W/${stats.losses}L (${wr}) | $${stats.pnl.toFixed(2)}`);
   }
 
+  // Forecast accuracy stats
+  await showForecastAccuracy(supabase);
+
   console.log('');
+}
+
+async function showForecastAccuracy(supabase) {
+  const { data } = await supabase
+    .from('forecast_accuracy')
+    .select('*')
+    .not('actual_temp_f', 'is', null);
+
+  if (!data || data.length === 0) {
+    console.log('\n📊 Forecast Accuracy: No data yet (waiting for market resolutions)');
+    return;
+  }
+
+  const openMeteoErrors = data.map(d => parseFloat(d.open_meteo_error_f)).filter(e => !isNaN(e));
+  const tomorrowErrors = data.map(d => parseFloat(d.tomorrow_error_f)).filter(e => !isNaN(e));
+
+  const avgOpenMeteo = openMeteoErrors.length > 0
+    ? openMeteoErrors.reduce((a, b) => a + b, 0) / openMeteoErrors.length
+    : null;
+  const avgTomorrow = tomorrowErrors.length > 0
+    ? tomorrowErrors.reduce((a, b) => a + b, 0) / tomorrowErrors.length
+    : null;
+
+  console.log('\n📊 Forecast Accuracy:');
+  if (avgOpenMeteo !== null) {
+    console.log(`   Open-Meteo:   ${avgOpenMeteo.toFixed(1)}°F avg error (${openMeteoErrors.length} markets)`);
+  }
+  if (avgTomorrow !== null) {
+    console.log(`   Tomorrow.io:  ${avgTomorrow.toFixed(1)}°F avg error (${tomorrowErrors.length} markets)`);
+    if (avgOpenMeteo !== null) {
+      const better = avgTomorrow < avgOpenMeteo ? 'Tomorrow.io' : 'Open-Meteo';
+      const diff = Math.abs(avgOpenMeteo - avgTomorrow);
+      console.log(`   Better source: ${better} (by ${diff.toFixed(1)}°F)`);
+    }
+  }
 }
 
 async function scanOnly() {
@@ -525,7 +562,14 @@ async function scanOnly() {
     if (opp) {
       mispricingCount++;
       console.log(`\n📊 OPPORTUNITY: ${market.city.toUpperCase()} - ${market.dateStr}`);
-      console.log(`   Forecast: ${forecast.highC}°C / ${forecast.highF}°F (${forecast.confidence})`);
+      console.log(`   Forecast: ${forecast.highC}°C / ${forecast.highF}°F (${opp.confidence})`);
+      // Show Tomorrow.io comparison for NYC
+      if (forecast.tomorrowForecast) {
+        console.log(`   Tomorrow.io: ${forecast.tomorrowForecast.highC}°C / ${forecast.tomorrowForecast.highF}°F`);
+        if (opp.forecastNote) {
+          console.log(`   Note: ${opp.forecastNote}`);
+        }
+      }
       console.log(`   Total Prob: ${(opp.totalProbability * 100).toFixed(1)}%`);
       console.log(`   Edge: ${opp.mispricingPct.toFixed(1)}%`);
       console.log(`   Best Range: ${opp.bestRange.name} @ ${(opp.bestRange.price * 100).toFixed(0)}¢`);

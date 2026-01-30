@@ -103,8 +103,90 @@ ORDER BY ABS(f1.high_temp_f - f2.high_temp_f) DESC
 LIMIT 50;
 
 -- =============================================================================
+-- 4. ADD TOMORROW.IO COLUMNS TO FORECAST_HISTORY
+-- =============================================================================
+DO $$
+BEGIN
+  -- Add tomorrow_high_c column
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'forecast_history' AND column_name = 'tomorrow_high_c'
+  ) THEN
+    ALTER TABLE forecast_history ADD COLUMN tomorrow_high_c NUMERIC;
+  END IF;
+
+  -- Add tomorrow_high_f column
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'forecast_history' AND column_name = 'tomorrow_high_f'
+  ) THEN
+    ALTER TABLE forecast_history ADD COLUMN tomorrow_high_f NUMERIC;
+  END IF;
+END $$;
+
+-- =============================================================================
+-- 5. FORECAST ACCURACY TABLE (track which source is more accurate)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS forecast_accuracy (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  city TEXT NOT NULL,
+  market_date DATE NOT NULL,
+  open_meteo_forecast_f NUMERIC,
+  tomorrow_forecast_f NUMERIC,
+  actual_temp_f NUMERIC,
+  open_meteo_error_f NUMERIC,
+  tomorrow_error_f NUMERIC,
+  resolved_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(city, market_date)
+);
+
+-- Index for querying accuracy stats
+CREATE INDEX IF NOT EXISTS idx_forecast_accuracy_city ON forecast_accuracy(city);
+CREATE INDEX IF NOT EXISTS idx_forecast_accuracy_date ON forecast_accuracy(market_date);
+
+COMMENT ON TABLE forecast_accuracy IS 'Track forecast accuracy by source (Open-Meteo vs Tomorrow.io)';
+
+-- View: Forecast accuracy summary
+CREATE OR REPLACE VIEW forecast_accuracy_summary AS
+SELECT
+  city,
+  COUNT(*) as markets_resolved,
+  ROUND(AVG(open_meteo_error_f), 2) as avg_open_meteo_error_f,
+  ROUND(AVG(tomorrow_error_f), 2) as avg_tomorrow_error_f,
+  ROUND(
+    100.0 * COUNT(*) FILTER (WHERE open_meteo_error_f < COALESCE(tomorrow_error_f, open_meteo_error_f + 1))
+    / NULLIF(COUNT(*) FILTER (WHERE tomorrow_error_f IS NOT NULL), 0), 1
+  ) as open_meteo_win_pct
+FROM forecast_accuracy
+WHERE actual_temp_f IS NOT NULL
+GROUP BY city
+ORDER BY markets_resolved DESC;
+
+-- View: Overall accuracy by source
+CREATE OR REPLACE VIEW forecast_source_accuracy AS
+SELECT
+  'Open-Meteo' as source,
+  COUNT(*) as markets,
+  ROUND(AVG(open_meteo_error_f), 2) as avg_error_f,
+  ROUND(MIN(open_meteo_error_f), 2) as min_error_f,
+  ROUND(MAX(open_meteo_error_f), 2) as max_error_f
+FROM forecast_accuracy
+WHERE actual_temp_f IS NOT NULL
+UNION ALL
+SELECT
+  'Tomorrow.io' as source,
+  COUNT(*) as markets,
+  ROUND(AVG(tomorrow_error_f), 2) as avg_error_f,
+  ROUND(MIN(tomorrow_error_f), 2) as min_error_f,
+  ROUND(MAX(tomorrow_error_f), 2) as max_error_f
+FROM forecast_accuracy
+WHERE tomorrow_error_f IS NOT NULL;
+
+-- =============================================================================
 -- DONE
 -- =============================================================================
 -- To verify, run:
 -- SELECT * FROM forecast_history LIMIT 5;
 -- SELECT * FROM weather_strategy_performance;
+-- SELECT * FROM forecast_accuracy_summary;
+-- SELECT * FROM forecast_source_accuracy;
