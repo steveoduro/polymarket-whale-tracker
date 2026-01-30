@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS weather_opportunities (
   status TEXT DEFAULT 'detected',  -- detected, traded, expired, resolved
   created_at TIMESTAMPTZ DEFAULT now(),
 
-  UNIQUE(market_slug, created_at::date)
+  -- One opportunity per market per target date
+  UNIQUE(market_slug, target_date)
 );
 
 -- Indexes
