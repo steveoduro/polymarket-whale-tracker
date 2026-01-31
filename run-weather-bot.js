@@ -117,31 +117,67 @@ function formatTradeAlert(opportunity, positions) {
   const maxPayout = positions.maxPayout;
   const strategy = opportunity.strategy || 'range_mispricing';
 
-  let msg = strategy === 'forecast_arbitrage'
-    ? `📈 *FORECAST SHIFT DETECTED*\n\n`
-    : `🌡️ *WEATHER OPPORTUNITY*\n\n`;
+  let msg;
 
-  msg += `📍 ${market.city.toUpperCase()} - ${market.dateStr}\n`;
-  msg += `🎯 Forecast: ${forecast.highC}°C / ${forecast.highF}°F (${forecast.confidence})\n`;
+  // Different format for hedge trades
+  if (opportunity.isHedge) {
+    msg = `🛡️ *HEDGE TRADE*\n\n`;
+    msg += `📍 ${market.city.toUpperCase()} - ${market.dateStr}\n`;
+    msg += `⚠️ Forecast shifted against your position!\n\n`;
+    msg += `📊 *You hold:* ${opportunity.hedgingPosition}\n`;
+    msg += `🔄 *New forecast:* ${forecast.highF}°F / ${forecast.highC}°C\n`;
 
-  // Add shift info for forecast arbitrage
-  if (strategy === 'forecast_arbitrage' && opportunity.forecastShift) {
-    const shift = opportunity.forecastShift;
-    msg += `🔄 Shift: ${shift.shiftF > 0 ? '+' : ''}${shift.shiftF}°F (${shift.direction})\n`;
-    msg += `   Previous: ${shift.previousHighF}°F → Now: ${shift.currentHighF}°F\n`;
+    if (opportunity.forecastShift) {
+      const shift = opportunity.forecastShift;
+      msg += `   Shift: ${shift.shiftF > 0 ? '+' : ''}${shift.shiftF}°F (${shift.direction})\n`;
+    }
+
+    msg += `\n*Hedge Position:*\n`;
+    for (const pos of positions.positions) {
+      msg += `  Buy ${pos.range}: $${pos.amount.toFixed(2)} @ ${(pos.price * 100).toFixed(0)}¢\n`;
+    }
+    msg += `\n💰 Hedge Cost: $${totalCost}`;
+    msg += `\n_Hedging reduces max win but protects against shifted forecast_`;
+
+  } else if (strategy === 'forecast_arbitrage') {
+    msg = `📈 *FORECAST SHIFT DETECTED*\n\n`;
+    msg += `📍 ${market.city.toUpperCase()} - ${market.dateStr}\n`;
+    msg += `🎯 Forecast: ${forecast.highC}°C / ${forecast.highF}°F (${forecast.confidence})\n`;
+
+    if (opportunity.forecastShift) {
+      const shift = opportunity.forecastShift;
+      msg += `🔄 Shift: ${shift.shiftF > 0 ? '+' : ''}${shift.shiftF}°F (${shift.direction})\n`;
+      msg += `   Previous: ${shift.previousHighF}°F → Now: ${shift.currentHighF}°F\n`;
+    }
+
+    msg += `\n*Strategy:* Forecast Arbitrage\n`;
+    msg += `*Market Analysis:*\n`;
+    msg += `  Total probability: ${((opportunity.totalProbability || 0) * 100).toFixed(1)}%\n`;
+    msg += `  Edge: ${(opportunity.mispricingPct || 0).toFixed(1)}%\n\n`;
+    msg += `*Position (Paper):*\n`;
+
+    for (const pos of positions.positions) {
+      msg += `  Buy ${pos.range}: $${pos.amount.toFixed(2)} @ ${(pos.price * 100).toFixed(0)}¢\n`;
+    }
+
+    msg += `\n💰 Cost: $${totalCost} | Max Payout: $${maxPayout}`;
+
+  } else {
+    msg = `🌡️ *WEATHER OPPORTUNITY*\n\n`;
+    msg += `📍 ${market.city.toUpperCase()} - ${market.dateStr}\n`;
+    msg += `🎯 Forecast: ${forecast.highC}°C / ${forecast.highF}°F (${forecast.confidence})\n`;
+    msg += `\n*Strategy:* Range Mispricing\n`;
+    msg += `*Market Analysis:*\n`;
+    msg += `  Total probability: ${((opportunity.totalProbability || 0) * 100).toFixed(1)}%\n`;
+    msg += `  Edge: ${(opportunity.mispricingPct || 0).toFixed(1)}%\n\n`;
+    msg += `*Position (Paper):*\n`;
+
+    for (const pos of positions.positions) {
+      msg += `  Buy ${pos.range}: $${pos.amount.toFixed(2)} @ ${(pos.price * 100).toFixed(0)}¢\n`;
+    }
+
+    msg += `\n💰 Cost: $${totalCost} | Max Payout: $${maxPayout}`;
   }
-
-  msg += `\n*Strategy:* ${strategy === 'forecast_arbitrage' ? 'Forecast Arbitrage' : 'Range Mispricing'}\n`;
-  msg += `*Market Analysis:*\n`;
-  msg += `  Total probability: ${(opportunity.totalProbability * 100).toFixed(1)}%\n`;
-  msg += `  Edge: ${opportunity.mispricingPct.toFixed(1)}%\n\n`;
-  msg += `*Position (Paper):*\n`;
-
-  for (const pos of positions.positions) {
-    msg += `  Buy ${pos.range}: $${pos.amount.toFixed(2)} @ ${(pos.price * 100).toFixed(0)}¢\n`;
-  }
-
-  msg += `\n💰 Cost: $${totalCost} | Max Payout: $${maxPayout}`;
 
   return msg;
 }
@@ -249,18 +285,61 @@ class WeatherBot {
           continue;
         }
 
-        // Skip if we already have a position
-        const hasPosition = await this.trader.hasExistingPosition(market.slug);
-        if (hasPosition) {
-          continue;
-        }
-
-        // Get forecast
+        // Get forecast first (needed for both new positions and hedging)
         const forecast = await this.weatherApi.getForecastForDate(market.city, market.dateStr);
         if (!forecast) continue;
 
         // Save forecast to history (for future shift detection)
         await this.weatherApi.saveForecastHistory(this.supabase, forecast);
+
+        // Check for existing position
+        const existingPosition = await this.trader.getExistingPosition(market.slug);
+
+        if (existingPosition) {
+          // === HEDGE CHECK: Does forecast shift threaten our position? ===
+          const previousForecast = await this.weatherApi.getPreviousForecast(
+            this.supabase,
+            market.city,
+            market.dateStr,
+            CONFIG.FORECAST_COMPARE_HOURS
+          );
+
+          if (previousForecast) {
+            const forecastShift = this.weatherApi.compareForecast(forecast, previousForecast, {
+              minShiftF: CONFIG.FORECAST_SHIFT_MIN_F,
+              minShiftC: CONFIG.FORECAST_SHIFT_MIN_C,
+            });
+
+            if (forecastShift) {
+              const forecastTemp = market.unit === 'F' ? forecast.highF : forecast.highC;
+              const isAgainst = this.detector.isShiftAgainstPosition(existingPosition, forecastTemp, market.unit);
+
+              if (isAgainst) {
+                log('info', 'Forecast shifted AGAINST position - creating hedge', {
+                  city: market.city,
+                  date: market.dateStr,
+                  held: existingPosition.range_name,
+                  newForecast: forecastTemp,
+                  shift: forecastShift.shiftF + '°F',
+                });
+
+                const hedgeOpp = this.detector.createHedgeOpportunity(market, forecast, forecastShift, existingPosition);
+                if (hedgeOpp) {
+                  forecastArbitrageOpps.push(hedgeOpp);
+                }
+              } else {
+                log('info', 'Forecast shift detected but favors our position', {
+                  city: market.city,
+                  held: existingPosition.range_name,
+                  shift: forecastShift.shiftF + '°F',
+                });
+              }
+            }
+          }
+          continue; // Skip Range Mispricing for markets we already hold
+        }
+
+        // === No existing position - look for new opportunities ===
 
         // === STRATEGY 1: Range Mispricing ===
         const mispricingOpp = this.detector.analyzeMarket(market, forecast);
@@ -269,8 +348,7 @@ class WeatherBot {
           rangeMispricingOpps.push(mispricingOpp);
         }
 
-        // === STRATEGY 2: Forecast Arbitrage ===
-        // Get previous forecast from N hours ago
+        // === STRATEGY 2: Forecast Arbitrage (new positions) ===
         const previousForecast = await this.weatherApi.getPreviousForecast(
           this.supabase,
           market.city,
@@ -279,14 +357,13 @@ class WeatherBot {
         );
 
         if (previousForecast) {
-          // Check for significant shift
           const forecastShift = this.weatherApi.compareForecast(forecast, previousForecast, {
             minShiftF: CONFIG.FORECAST_SHIFT_MIN_F,
             minShiftC: CONFIG.FORECAST_SHIFT_MIN_C,
           });
 
           if (forecastShift) {
-            log('info', 'Forecast shift detected', {
+            log('info', 'Forecast shift detected (new position)', {
               city: market.city,
               date: market.dateStr,
               shift: `${forecastShift.shiftF}°F (${forecastShift.direction})`,
@@ -343,17 +420,30 @@ class WeatherBot {
       log('info', `Strategy 2 (Forecast Arbitrage): ${rankedShifts.length} shift opportunities`);
       log('info', `Strategy 3 (Precipitation): ${rankedPrecip.length} precipitation opportunities`);
 
-      // 6. Combine and execute (prioritize forecast shifts as they're time-sensitive)
-      const allOpportunities = [...rankedShifts, ...rankedMispricing, ...rankedPrecip];
+      // 6. Combine and execute (prioritize hedges first, then shifts, then mispricing)
+      // Separate hedges from new positions
+      const hedgeOpps = rankedShifts.filter(o => o.isHedge);
+      const newShiftOpps = rankedShifts.filter(o => !o.isHedge);
+      const allNewOpportunities = [...newShiftOpps, ...rankedMispricing, ...rankedPrecip];
 
-      // Check position limit
+      // Check position limit (for non-hedge trades only)
       const openCount = await this.trader.getOpenPositionCount();
       const slotsAvailable = CONFIG.MAX_OPEN_POSITIONS - openCount;
 
       let executed = 0;
       const executedMarkets = new Set();
 
-      for (const opp of allOpportunities) {
+      // Execute hedges first (no position limit - they protect existing positions)
+      for (const opp of hedgeOpps) {
+        if (executedMarkets.has(opp.market.slug)) continue;
+
+        await this.executeOpportunity(opp);
+        executedMarkets.add(opp.market.slug);
+        log('info', 'Hedge executed (does not count against position limit)');
+      }
+
+      // Execute new positions (subject to limit)
+      for (const opp of allNewOpportunities) {
         if (executed >= slotsAvailable) break;
 
         // Don't trade same market twice in one cycle
@@ -384,22 +474,57 @@ class WeatherBot {
   async executeOpportunity(opportunity) {
     // Generate position sizes
     const capital = this.trader.paperBalance;
-    const positions = this.detector.generatePositions(opportunity, capital, {
-      maxPositionPct: CONFIG.MAX_POSITION_PCT,
-      maxPerRange: CONFIG.MAX_PER_RANGE_PCT,
-      hedgeRanges: CONFIG.HEDGE_RANGES,
-    });
+    let positions;
+
+    if (opportunity.isHedge) {
+      // Use hedge sizing (50% of original position)
+      const hedgeSize = this.detector.calculateHedgeSize(
+        { cost: opportunity.hedgingPositionCost },
+        capital,
+        0.5 // 50% hedge ratio
+      );
+
+      // Create position manually with hedge size
+      const range = opportunity.bestRange;
+      const shares = hedgeSize / range.price;
+
+      positions = {
+        positions: [{
+          range: range.name,
+          tokenId: range.tokenId,
+          side: 'BUY',
+          price: range.price,
+          amount: hedgeSize,
+          shares: Math.floor(shares * 100) / 100,
+          potentialPayout: Math.floor(shares),
+          isHedge: true,
+        }],
+        totalCost: hedgeSize,
+        maxPayout: Math.floor(shares),
+        marketSlug: opportunity.market.slug,
+      };
+    } else {
+      // Normal Kelly sizing
+      positions = this.detector.generatePositions(opportunity, capital, {
+        maxPositionPct: CONFIG.MAX_POSITION_PCT,
+        maxPerRange: CONFIG.MAX_PER_RANGE_PCT,
+        hedgeRanges: CONFIG.HEDGE_RANGES,
+      });
+    }
 
     if (positions.positions.length === 0) {
       log('warn', 'No valid positions generated', { market: opportunity.market.slug });
       return;
     }
 
-    log('trade', 'Executing opportunity', {
+    const tradeType = opportunity.isHedge ? 'hedge' : 'trade';
+    log(tradeType, `Executing ${opportunity.isHedge ? 'HEDGE' : 'opportunity'}`, {
       city: opportunity.market.city,
       date: opportunity.market.dateStr,
-      edge: opportunity.mispricingPct.toFixed(1) + '%',
+      strategy: opportunity.strategy,
+      edge: (opportunity.mispricingPct || 0).toFixed(1) + '%',
       cost: positions.totalCost.toFixed(2),
+      hedging: opportunity.hedgingPosition || null,
     });
 
     // Execute trades
