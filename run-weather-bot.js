@@ -238,6 +238,14 @@ class WeatherBot {
       const forecastArbitrageOpps = [];
 
       for (const market of validMarkets) {
+        // Skip illiquid markets (>50% avg spread)
+        if (!market.hasLiquidity) {
+          log('info', `Skipping illiquid temperature market: ${market.slug}`, {
+            avgSpread: (market.avgSpread * 100).toFixed(0) + '%',
+          });
+          continue;
+        }
+
         // Skip if we already have a position
         const hasPosition = await this.trader.hasExistingPosition(market.slug);
         if (hasPosition) {
@@ -293,6 +301,14 @@ class WeatherBot {
       // 4. Analyze precipitation markets
       const precipitationOpps = [];
       for (const market of precipMarkets) {
+        // Skip illiquid markets (>50% avg spread)
+        if (!market.hasLiquidity) {
+          log('info', `Skipping illiquid precipitation market: ${market.slug}`, {
+            avgSpread: (market.avgSpread * 100).toFixed(0) + '%',
+          });
+          continue;
+        }
+
         // Skip if we already have a position
         const hasPosition = await this.trader.hasExistingPosition(market.slug);
         if (hasPosition) continue;
@@ -694,6 +710,13 @@ async function scanOnly() {
   let precipCount = 0;
 
   for (const market of precipMarkets) {
+    // Check liquidity first
+    if (!market.hasLiquidity) {
+      console.log(`\n🌧️ ${market.city.toUpperCase()} - ${market.month.toUpperCase()}: ⚠️ ILLIQUID (${(market.avgSpread * 100).toFixed(0)}% avg spread) - skipping`);
+      console.log(`   Total Prob: ${(market.totalProbability * 100).toFixed(0)}% (unreliable due to no liquidity)`);
+      continue;
+    }
+
     const forecast = await weatherApi.getMonthlyPrecipitationForecast(
       market.city,
       market.monthIdx,
@@ -714,6 +737,8 @@ async function scanOnly() {
       console.log(`\n🌧️ PRECIPITATION: ${market.city.toUpperCase()} - ${market.month.toUpperCase()} ${market.year}`);
       console.log(`   Forecast: ${forecast.estimatedMonthlyInches}" (${forecast.forecastDays}/${forecast.daysInMonth} days covered)`);
       console.log(`   Confidence: ${forecast.confidence} (${Math.round(forecast.coverageRatio * 100)}% coverage)`);
+      console.log(`   Liquidity: OK (${(market.avgSpread * 100).toFixed(0)}% avg spread)`);
+      console.log(`   Total Prob: ${(market.totalProbability * 100).toFixed(1)}%`);
       console.log(`   Best Range: ${opp.bestRange.name} @ ${(opp.bestRange.price * 100).toFixed(0)}¢`);
       console.log(`   Market Prob: ${(opp.marketProbability * 100).toFixed(1)}% → Our Prob: ${(opp.trueProbability * 100).toFixed(1)}%`);
       console.log(`   Edge: ${opp.edgePct.toFixed(1)}% | EV: ${(opp.expectedValue.evPct).toFixed(1)}%/dollar`);
@@ -721,6 +746,7 @@ async function scanOnly() {
     } else {
       // Show market even if no opportunity
       console.log(`\n🌧️ ${market.city.toUpperCase()} - ${market.month.toUpperCase()}: No opportunity (forecast: ${forecast?.estimatedMonthlyInches || '?'}")`);
+      console.log(`   Liquidity: OK (${(market.avgSpread * 100).toFixed(0)}% avg spread) | Total Prob: ${(market.totalProbability * 100).toFixed(1)}%`);
     }
   }
 
