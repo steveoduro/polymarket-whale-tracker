@@ -203,9 +203,12 @@ class WeatherBot {
     this.lastScanTime = new Date();
 
     try {
-      // 1. Get active temperature markets
-      const markets = await this.marketScanner.getActiveTemperatureMarkets();
-      log('info', `Found ${markets.length} temperature markets`);
+      // 1. Get active markets (temperature + precipitation)
+      const tempMarkets = await this.marketScanner.getActiveTemperatureMarkets();
+      const precipMarkets = await this.marketScanner.getActivePrecipitationMarkets();
+      const markets = tempMarkets; // Keep for backwards compatibility below
+
+      log('info', `Found ${tempMarkets.length} temperature markets, ${precipMarkets.length} precipitation markets`);
 
       // 2. Filter for active cities and valid dates
       const today = new Date();
@@ -275,15 +278,39 @@ class WeatherBot {
         }
       }
 
-      // 4. Rank opportunities from both strategies
+      // 4. Analyze precipitation markets
+      const precipitationOpps = [];
+      for (const market of precipMarkets) {
+        // Skip if we already have a position
+        const hasPosition = await this.trader.hasExistingPosition(market.slug);
+        if (hasPosition) continue;
+
+        // Get monthly precipitation forecast
+        const forecast = await this.weatherApi.getMonthlyPrecipitationForecast(
+          market.city,
+          market.monthIdx,
+          market.year
+        );
+        if (!forecast) continue;
+
+        // Analyze for mispricing
+        const opportunity = this.detector.analyzePrecipitationMarket(market, forecast);
+        if (opportunity) {
+          precipitationOpps.push(opportunity);
+        }
+      }
+
+      // 5. Rank opportunities from all strategies
       const rankedMispricing = this.detector.rankOpportunities(rangeMispricingOpps);
       const rankedShifts = this.detector.rankForecastShiftOpportunities(forecastArbitrageOpps);
+      const rankedPrecip = this.detector.rankPrecipitationOpportunities(precipitationOpps);
 
       log('info', `Strategy 1 (Range Mispricing): ${rankedMispricing.length} profitable opportunities`);
       log('info', `Strategy 2 (Forecast Arbitrage): ${rankedShifts.length} shift opportunities`);
+      log('info', `Strategy 3 (Precipitation): ${rankedPrecip.length} precipitation opportunities`);
 
-      // 5. Combine and execute (prioritize forecast shifts as they're time-sensitive)
-      const allOpportunities = [...rankedShifts, ...rankedMispricing];
+      // 6. Combine and execute (prioritize forecast shifts as they're time-sensitive)
+      const allOpportunities = [...rankedShifts, ...rankedMispricing, ...rankedPrecip];
 
       // Check position limit
       const openCount = await this.trader.getOpenPositionCount();
@@ -306,9 +333,11 @@ class WeatherBot {
       // Log API usage
       const apiStats = this.weatherApi.getStats();
       log('info', 'Scan cycle complete', {
-        marketsScanned: validMarkets.length,
+        tempMarketsScanned: validMarkets.length,
+        precipMarketsScanned: precipMarkets.length,
         rangeMispricingOpps: rankedMispricing.length,
         forecastShiftOpps: rankedShifts.length,
+        precipitationOpps: rankedPrecip.length,
         executed: executed,
         apiCalls: apiStats.requestCount,
       });
@@ -462,6 +491,24 @@ async function showStatus() {
     console.log(`  ${stratName.padEnd(20)} ${stats.wins}W/${stats.losses}L (${wr}) | P&L: $${stats.pnl.toFixed(2)} | ROI: ${roi}`);
   }
 
+  // Performance by Market Type
+  console.log('\nPerformance by Market Type:');
+  const byMarketType = {};
+  for (const t of trades) {
+    const mtype = t.market_type || 'temperature';
+    if (!byMarketType[mtype]) byMarketType[mtype] = { wins: 0, losses: 0, pnl: 0, cost: 0 };
+    if (t.status === 'won') byMarketType[mtype].wins++;
+    if (t.status === 'lost') byMarketType[mtype].losses++;
+    byMarketType[mtype].pnl += parseFloat(t.pnl) || 0;
+    byMarketType[mtype].cost += parseFloat(t.cost) || 0;
+  }
+  for (const [mtype, stats] of Object.entries(byMarketType)) {
+    const wr = stats.wins + stats.losses > 0 ? ((stats.wins / (stats.wins + stats.losses)) * 100).toFixed(0) + '%' : '-';
+    const roi = stats.cost > 0 ? ((stats.pnl / stats.cost) * 100).toFixed(1) + '%' : '-';
+    const typeName = mtype.charAt(0).toUpperCase() + mtype.slice(1);
+    console.log(`  ${typeName.padEnd(15)} ${stats.wins}W/${stats.losses}L (${wr}) | P&L: $${stats.pnl.toFixed(2)} | ROI: ${roi}`);
+  }
+
   // Recent trades
   console.log('\nRecent Trades:');
   for (const trade of trades.slice(0, 10)) {
@@ -605,10 +652,47 @@ async function scanOnly() {
     }
   }
 
+  // === PRECIPITATION MARKETS ===
   console.log(`\n${'='.repeat(50)}`);
-  console.log(`Range Mispricing opportunities: ${mispricingCount}`);
-  console.log(`Forecast Arbitrage opportunities: ${shiftCount}`);
-  console.log(`Total opportunities: ${mispricingCount + shiftCount}\n`);
+  console.log('PRECIPITATION MARKETS');
+  console.log('='.repeat(50));
+
+  const precipMarkets = await scanner.getActivePrecipitationMarkets();
+  console.log(`Found ${precipMarkets.length} precipitation markets\n`);
+
+  let precipCount = 0;
+
+  for (const market of precipMarkets) {
+    const forecast = await weatherApi.getMonthlyPrecipitationForecast(
+      market.city,
+      market.monthIdx,
+      market.year
+    );
+    if (!forecast) continue;
+
+    const opp = detector.analyzePrecipitationMarket(market, forecast);
+    if (opp) {
+      precipCount++;
+      console.log(`\n🌧️ PRECIPITATION: ${market.city.toUpperCase()} - ${market.month.toUpperCase()} ${market.year}`);
+      console.log(`   Forecast: ${forecast.estimatedMonthlyInches}" (${forecast.forecastDays}/${forecast.daysInMonth} days covered)`);
+      console.log(`   Confidence: ${forecast.confidence} (${Math.round(forecast.coverageRatio * 100)}% coverage)`);
+      console.log(`   Total Prob: ${(opp.totalProbability * 100).toFixed(1)}%`);
+      console.log(`   Edge: ${opp.mispricingPct.toFixed(1)}%`);
+      console.log(`   Best Range: ${opp.bestRange.name} @ ${(opp.bestRange.price * 100).toFixed(0)}¢`);
+      console.log(`   EV: ${(opp.expectedValue.evPct).toFixed(1)}% per dollar`);
+    } else {
+      // Show market even if no opportunity
+      console.log(`\n🌧️ ${market.city.toUpperCase()} - ${market.month.toUpperCase()}: No opportunity (forecast: ${forecast?.estimatedMonthlyInches || '?'}")`);
+    }
+  }
+
+  console.log(`\n${'='.repeat(50)}`);
+  console.log('SUMMARY');
+  console.log('='.repeat(50));
+  console.log(`Temperature - Range Mispricing: ${mispricingCount}`);
+  console.log(`Temperature - Forecast Arbitrage: ${shiftCount}`);
+  console.log(`Precipitation: ${precipCount}`);
+  console.log(`Total opportunities: ${mispricingCount + shiftCount + precipCount}\n`);
 }
 
 async function resolveOnly() {

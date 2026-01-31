@@ -183,6 +183,71 @@ FROM forecast_accuracy
 WHERE tomorrow_error_f IS NOT NULL;
 
 -- =============================================================================
+-- 6. ADD PRECIPITATION SUPPORT
+-- =============================================================================
+
+-- Add market_type to weather_paper_trades
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'weather_paper_trades' AND column_name = 'market_type'
+  ) THEN
+    ALTER TABLE weather_paper_trades ADD COLUMN market_type TEXT DEFAULT 'temperature';
+  END IF;
+END $$;
+
+-- Add precipitation fields to forecast_history
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'forecast_history' AND column_name = 'precipitation_mm'
+  ) THEN
+    ALTER TABLE forecast_history ADD COLUMN precipitation_mm NUMERIC;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'forecast_history' AND column_name = 'precipitation_inches'
+  ) THEN
+    ALTER TABLE forecast_history ADD COLUMN precipitation_inches NUMERIC;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'forecast_history' AND column_name = 'precipitation_probability'
+  ) THEN
+    ALTER TABLE forecast_history ADD COLUMN precipitation_probability NUMERIC;
+  END IF;
+END $$;
+
+-- Index for market type
+CREATE INDEX IF NOT EXISTS idx_weather_trades_market_type ON weather_paper_trades(market_type);
+
+-- View: Performance by market type
+CREATE OR REPLACE VIEW weather_market_type_performance AS
+SELECT
+  COALESCE(market_type, 'temperature') as market_type,
+  COUNT(*) as total_trades,
+  COUNT(*) FILTER (WHERE status = 'won') as wins,
+  COUNT(*) FILTER (WHERE status = 'lost') as losses,
+  COUNT(*) FILTER (WHERE status = 'open') as open,
+  COALESCE(SUM(pnl), 0) as total_pnl,
+  COALESCE(SUM(cost), 0) as total_cost,
+  CASE
+    WHEN COUNT(*) FILTER (WHERE status IN ('won', 'lost')) > 0
+    THEN ROUND(
+      COUNT(*) FILTER (WHERE status = 'won')::numeric /
+      COUNT(*) FILTER (WHERE status IN ('won', 'lost')) * 100, 1
+    )
+    ELSE 0
+  END as win_rate_pct
+FROM weather_paper_trades
+GROUP BY COALESCE(market_type, 'temperature')
+ORDER BY total_trades DESC;
+
+-- =============================================================================
 -- DONE
 -- =============================================================================
 -- To verify, run:
@@ -190,3 +255,4 @@ WHERE tomorrow_error_f IS NOT NULL;
 -- SELECT * FROM weather_strategy_performance;
 -- SELECT * FROM forecast_accuracy_summary;
 -- SELECT * FROM forecast_source_accuracy;
+-- SELECT * FROM weather_market_type_performance;
