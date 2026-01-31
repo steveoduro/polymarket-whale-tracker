@@ -30,15 +30,22 @@ const CONFIG = {
 
   // Capital
   PAPER_BANKROLL: 1000,
-  MAX_POSITION_PCT: 0.30,         // Max 30% of capital per market
-  MAX_PER_RANGE_PCT: 0.15,        // Max 15% per single range
   MAX_OPEN_POSITIONS: 10,         // Max markets at once
+
+  // Risk Management (Kelly Criterion)
+  MIN_PROBABILITY: parseFloat(process.env.MIN_PROBABILITY) || 0.20,  // Only trade ranges ≥20% probability
+  KELLY_FRACTION: parseFloat(process.env.KELLY_FRACTION) || 0.5,     // Half Kelly (conservative)
+  MAX_POSITION_PCT: parseFloat(process.env.MAX_POSITION_PERCENT) || 0.10,  // Max 10% of bankroll per position
+  MIN_BET_SIZE: parseFloat(process.env.MIN_BET_SIZE) || 10,          // Minimum $10 per trade
+
+  // Legacy settings (now calculated via Kelly, kept for reference)
+  MAX_PER_RANGE_PCT: 0.10,        // Superseded by Kelly sizing
+  HEDGE_RANGES: false,            // Disabled - Kelly sizes individual positions
 
   // Strategy thresholds
   MIN_MISPRICING_PCT: 2,          // Only trade if 2%+ edge
-  MIN_RANGE_PRICE: 0.10,          // Range must be at least 10¢
+  MIN_RANGE_PRICE: 0.10,          // Range must be at least 10¢ (superseded by MIN_PROBABILITY)
   MAX_RANGE_PRICE: 0.85,          // Don't buy above 85¢
-  HEDGE_RANGES: true,             // Spread across nearby ranges
 
   // Forecast Arbitrage settings
   FORECAST_SHIFT_MIN_F: 2,        // Minimum 2°F shift to trigger
@@ -171,6 +178,11 @@ class WeatherBot {
       minMispricingPct: CONFIG.MIN_MISPRICING_PCT,
       minRangePrice: CONFIG.MIN_RANGE_PRICE,
       maxRangePrice: CONFIG.MAX_RANGE_PRICE,
+      // Risk management
+      minProbability: CONFIG.MIN_PROBABILITY,
+      kellyFraction: CONFIG.KELLY_FRACTION,
+      maxPositionPct: CONFIG.MAX_POSITION_PCT,
+      minBetSize: CONFIG.MIN_BET_SIZE,
       log,
     });
     this.trader = new WeatherTrader({
@@ -536,6 +548,13 @@ async function showStatus() {
   // Forecast accuracy stats
   await showForecastAccuracy(supabase);
 
+  // Risk settings
+  console.log('\n⚙️  Risk Settings:');
+  console.log(`   Min Probability: ${(CONFIG.MIN_PROBABILITY * 100).toFixed(0)}%`);
+  console.log(`   Kelly Fraction: ${(CONFIG.KELLY_FRACTION * 100).toFixed(0)}% (${CONFIG.KELLY_FRACTION === 0.5 ? 'Half Kelly' : CONFIG.KELLY_FRACTION === 0.25 ? 'Quarter Kelly' : 'Custom'})`);
+  console.log(`   Max Position: ${(CONFIG.MAX_POSITION_PCT * 100).toFixed(0)}% of bankroll`);
+  console.log(`   Min Bet Size: $${CONFIG.MIN_BET_SIZE}`);
+
   console.log('');
 }
 
@@ -584,6 +603,11 @@ async function scanOnly() {
     minMispricingPct: CONFIG.MIN_MISPRICING_PCT,
     minRangePrice: CONFIG.MIN_RANGE_PRICE,
     maxRangePrice: CONFIG.MAX_RANGE_PRICE,
+    // Risk management
+    minProbability: CONFIG.MIN_PROBABILITY,
+    kellyFraction: CONFIG.KELLY_FRACTION,
+    maxPositionPct: CONFIG.MAX_POSITION_PCT,
+    minBetSize: CONFIG.MIN_BET_SIZE,
     log,
   });
 
@@ -608,6 +632,13 @@ async function scanOnly() {
     const opp = detector.analyzeMarket(market, forecast);
     if (opp) {
       mispricingCount++;
+      // Calculate Kelly size for display
+      const kelly = detector.calculateKellySize(
+        opp.marketProbability,
+        opp.trueProbability,
+        CONFIG.PAPER_BANKROLL
+      );
+
       console.log(`\n📊 OPPORTUNITY: ${market.city.toUpperCase()} - ${market.dateStr}`);
       console.log(`   Forecast: ${forecast.highC}°C / ${forecast.highF}°F (${opp.confidence})`);
       // Show Tomorrow.io comparison for NYC
@@ -617,10 +648,10 @@ async function scanOnly() {
           console.log(`   Note: ${opp.forecastNote}`);
         }
       }
-      console.log(`   Total Prob: ${(opp.totalProbability * 100).toFixed(1)}%`);
-      console.log(`   Edge: ${opp.mispricingPct.toFixed(1)}%`);
       console.log(`   Best Range: ${opp.bestRange.name} @ ${(opp.bestRange.price * 100).toFixed(0)}¢`);
-      console.log(`   EV: ${(opp.expectedValue.evPct).toFixed(1)}% per dollar`);
+      console.log(`   Market Prob: ${(opp.marketProbability * 100).toFixed(1)}% → Our Prob: ${(opp.trueProbability * 100).toFixed(1)}%`);
+      console.log(`   Edge: ${opp.edgePct.toFixed(1)}% | EV: ${(opp.expectedValue.evPct).toFixed(1)}%/dollar`);
+      console.log(`   Kelly Size: $${kelly.recommendedBet.toFixed(2)} (${kelly.percentOfBankroll.toFixed(1)}% of bankroll)`);
     }
 
     // === STRATEGY 2: Forecast Arbitrage ===
@@ -673,13 +704,20 @@ async function scanOnly() {
     const opp = detector.analyzePrecipitationMarket(market, forecast);
     if (opp) {
       precipCount++;
+      // Calculate Kelly size for display
+      const kelly = detector.calculateKellySize(
+        opp.marketProbability,
+        opp.trueProbability,
+        CONFIG.PAPER_BANKROLL
+      );
+
       console.log(`\n🌧️ PRECIPITATION: ${market.city.toUpperCase()} - ${market.month.toUpperCase()} ${market.year}`);
       console.log(`   Forecast: ${forecast.estimatedMonthlyInches}" (${forecast.forecastDays}/${forecast.daysInMonth} days covered)`);
       console.log(`   Confidence: ${forecast.confidence} (${Math.round(forecast.coverageRatio * 100)}% coverage)`);
-      console.log(`   Total Prob: ${(opp.totalProbability * 100).toFixed(1)}%`);
-      console.log(`   Edge: ${opp.mispricingPct.toFixed(1)}%`);
       console.log(`   Best Range: ${opp.bestRange.name} @ ${(opp.bestRange.price * 100).toFixed(0)}¢`);
-      console.log(`   EV: ${(opp.expectedValue.evPct).toFixed(1)}% per dollar`);
+      console.log(`   Market Prob: ${(opp.marketProbability * 100).toFixed(1)}% → Our Prob: ${(opp.trueProbability * 100).toFixed(1)}%`);
+      console.log(`   Edge: ${opp.edgePct.toFixed(1)}% | EV: ${(opp.expectedValue.evPct).toFixed(1)}%/dollar`);
+      console.log(`   Kelly Size: $${kelly.recommendedBet.toFixed(2)} (${kelly.percentOfBankroll.toFixed(1)}% of bankroll)`);
     } else {
       // Show market even if no opportunity
       console.log(`\n🌧️ ${market.city.toUpperCase()} - ${market.month.toUpperCase()}: No opportunity (forecast: ${forecast?.estimatedMonthlyInches || '?'}")`);
