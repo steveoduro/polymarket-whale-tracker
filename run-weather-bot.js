@@ -319,7 +319,10 @@ class WeatherBot {
           market.monthIdx,
           market.year
         );
-        if (!forecast) continue;
+        if (!forecast) {
+          log('warn', `No precipitation forecast for ${market.city} ${market.month} - skipping`);
+          continue;
+        }
 
         // Analyze for mispricing
         const opportunity = this.detector.analyzePrecipitationMarket(market, forecast);
@@ -722,7 +725,10 @@ async function scanOnly() {
       market.monthIdx,
       market.year
     );
-    if (!forecast) continue;
+    if (!forecast) {
+      console.log(`\n🌧️ ${market.city.toUpperCase()} - ${market.month.toUpperCase()}: ⚠️ No forecast data available - skipping`);
+      continue;
+    }
 
     const opp = detector.analyzePrecipitationMarket(market, forecast);
     if (opp) {
