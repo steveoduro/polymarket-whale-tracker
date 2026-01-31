@@ -214,6 +214,9 @@ class WeatherBot {
     log('info', '=== Starting scan cycle ===');
     this.lastScanTime = new Date();
 
+    // Reset API counter for this cycle
+    this.weatherApi.resetStats();
+
     try {
       // 1. Get active markets (temperature + precipitation)
       const tempMarkets = await this.marketScanner.getActiveTemperatureMarkets();
