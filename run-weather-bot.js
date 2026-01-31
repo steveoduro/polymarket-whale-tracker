@@ -315,6 +315,16 @@ class WeatherBot {
               const isAgainst = this.detector.isShiftAgainstPosition(existingPosition, forecastTemp, market.unit);
 
               if (isAgainst) {
+                // Check if we already hedged this position
+                const alreadyHedged = await this.trader.hasExistingHedge(market.slug, existingPosition.range_name);
+                if (alreadyHedged) {
+                  log('info', 'Hedge already exists for this position - skipping', {
+                    city: market.city,
+                    position: existingPosition.range_name
+                  });
+                  continue; // Don't create another hedge
+                }
+
                 log('info', 'Forecast shifted AGAINST position - creating hedge', {
                   city: market.city,
                   date: market.dateStr,
@@ -472,6 +482,21 @@ class WeatherBot {
   }
 
   async executeOpportunity(opportunity) {
+    // Safety net: double-check hedge doesn't already exist before executing
+    if (opportunity.isHedge) {
+      const alreadyHedged = await this.trader.hasExistingHedge(
+        opportunity.market.slug,
+        opportunity.hedgingPosition
+      );
+      if (alreadyHedged) {
+        log('info', 'Hedge already exists - skipping execution', {
+          city: opportunity.market.city,
+          hedgingPosition: opportunity.hedgingPosition
+        });
+        return;
+      }
+    }
+
     // Generate position sizes
     const capital = this.trader.paperBalance;
     let positions;
