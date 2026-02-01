@@ -30,7 +30,7 @@ const CONFIG = {
 
   // Capital
   PAPER_BANKROLL: 1000,
-  MAX_OPEN_POSITIONS: 10,         // Max markets at once
+  MAX_DEPLOYED_PCT: parseFloat(process.env.MAX_DEPLOYED_PCT) || 0.80,  // Max 80% of bankroll deployed
 
   // Risk Management (Kelly Criterion)
   MIN_PROBABILITY: parseFloat(process.env.MIN_PROBABILITY) || 0.20,  // Only trade ranges ≥20% probability
@@ -436,31 +436,66 @@ class WeatherBot {
       const newShiftOpps = rankedShifts.filter(o => !o.isHedge);
       const allNewOpportunities = [...newShiftOpps, ...rankedMispricing, ...rankedPrecip];
 
-      // Check position limit (for non-hedge trades only)
-      const openCount = await this.trader.getOpenPositionCount();
-      const slotsAvailable = CONFIG.MAX_OPEN_POSITIONS - openCount;
+      // Check capital limit (80% max deployed)
+      let currentDeployed = await this.trader.getDeployedCapital();
+      const maxDeployable = CONFIG.PAPER_BANKROLL * CONFIG.MAX_DEPLOYED_PCT;
+
+      log('info', 'Capital status', {
+        deployed: currentDeployed.toFixed(2),
+        maxDeployable: maxDeployable.toFixed(2),
+        available: (maxDeployable - currentDeployed).toFixed(2),
+        percentDeployed: ((currentDeployed / CONFIG.PAPER_BANKROLL) * 100).toFixed(1) + '%'
+      });
 
       let executed = 0;
       const executedMarkets = new Set();
 
-      // Execute hedges first (no position limit - they protect existing positions)
+      // Execute hedges first (no capital limit - they protect existing positions)
       for (const opp of hedgeOpps) {
         if (executedMarkets.has(opp.market.slug)) continue;
 
-        await this.executeOpportunity(opp);
+        const result = await this.executeOpportunity(opp);
         executedMarkets.add(opp.market.slug);
-        log('info', 'Hedge executed (does not count against position limit)');
+        if (result && result.cost) {
+          currentDeployed += result.cost;
+        }
+        log('info', 'Hedge executed (bypasses capital limit)');
       }
 
-      // Execute new positions (subject to limit)
+      // Execute new positions (subject to capital limit)
       for (const opp of allNewOpportunities) {
-        if (executed >= slotsAvailable) break;
-
         // Don't trade same market twice in one cycle
         if (executedMarkets.has(opp.market.slug)) continue;
 
-        await this.executeOpportunity(opp);
+        // Calculate position size for this opportunity
+        const positions = this.detector.generatePositions(opp, CONFIG.PAPER_BANKROLL, {
+          maxPositionPct: CONFIG.MAX_POSITION_PCT,
+        });
+
+        if (positions.positions.length === 0) continue;
+
+        const tradeCost = positions.totalCost;
+
+        // Check if this trade fits within capital limit
+        if (currentDeployed + tradeCost > maxDeployable) {
+          log('info', 'Trade would exceed capital limit - skipping', {
+            city: opp.market.city,
+            tradeCost: tradeCost.toFixed(2),
+            currentDeployed: currentDeployed.toFixed(2),
+            maxDeployable: maxDeployable.toFixed(2)
+          });
+          continue;
+        }
+
+        // Execute the trade
+        const result = await this.executeOpportunity(opp);
         executedMarkets.add(opp.market.slug);
+        if (result && result.cost) {
+          currentDeployed += result.cost;
+        } else {
+          // Fallback: use calculated cost if result doesn't have it
+          currentDeployed += tradeCost;
+        }
         executed++;
       }
 
@@ -560,6 +595,9 @@ class WeatherBot {
       const alert = formatTradeAlert(opportunity, positions);
       await sendTelegram(alert);
     }
+
+    // Return cost for capital tracking
+    return { cost: positions.totalCost };
   }
 
   async runResolutionCycle() {
@@ -720,8 +758,20 @@ async function showStatus() {
   // Forecast accuracy stats
   await showForecastAccuracy(supabase);
 
+  // Capital deployment
+  const deployedCapital = open.reduce((sum, t) => sum + parseFloat(t.cost || 0), 0);
+  const maxDeployable = CONFIG.PAPER_BANKROLL * CONFIG.MAX_DEPLOYED_PCT;
+  const capitalAvailable = maxDeployable - deployedCapital;
+
+  console.log('\n💰 Capital Deployment:');
+  console.log(`   Bankroll: $${CONFIG.PAPER_BANKROLL}`);
+  console.log(`   Deployed: $${deployedCapital.toFixed(2)} / $${maxDeployable.toFixed(2)} (${((deployedCapital / CONFIG.PAPER_BANKROLL) * 100).toFixed(1)}%)`);
+  console.log(`   Available: $${capitalAvailable.toFixed(2)}`);
+  console.log(`   Open Positions: ${open.length}`);
+
   // Risk settings
   console.log('\n⚙️  Risk Settings:');
+  console.log(`   Max Deployed: ${(CONFIG.MAX_DEPLOYED_PCT * 100).toFixed(0)}% of bankroll`);
   console.log(`   Min Probability: ${(CONFIG.MIN_PROBABILITY * 100).toFixed(0)}%`);
   console.log(`   Kelly Fraction: ${(CONFIG.KELLY_FRACTION * 100).toFixed(0)}% (${CONFIG.KELLY_FRACTION === 0.5 ? 'Half Kelly' : CONFIG.KELLY_FRACTION === 0.25 ? 'Quarter Kelly' : 'Custom'})`);
   console.log(`   Max Position: ${(CONFIG.MAX_POSITION_PCT * 100).toFixed(0)}% of bankroll`);
