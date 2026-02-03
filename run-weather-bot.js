@@ -129,11 +129,15 @@ function formatTradeAlert(opportunity, positions) {
   const maxPayout = positions.maxPayout;
   const strategy = opportunity.strategy || 'range_mispricing';
 
+  // Platform tag for multi-platform mode
+  const platform = market.platform || 'polymarket';
+  const platformTag = platform === 'kalshi' ? '[KL] ' : (CONFIG.KALSHI_ENABLED ? '[PM] ' : '');
+
   let msg;
 
   // Different format for hedge trades
   if (opportunity.isHedge) {
-    msg = `🛡️ *HEDGE TRADE*\n\n`;
+    msg = `🛡️ ${platformTag}*HEDGE TRADE*\n\n`;
     msg += `📍 ${market.city.toUpperCase()} - ${market.dateStr}\n`;
     msg += `⚠️ Forecast shifted against your position!\n\n`;
     msg += `📊 *You hold:* ${opportunity.hedgingPosition}\n`;
@@ -152,7 +156,7 @@ function formatTradeAlert(opportunity, positions) {
     msg += `\n_Hedging reduces max win but protects against shifted forecast_`;
 
   } else if (strategy === 'forecast_arbitrage') {
-    msg = `📈 *FORECAST SHIFT DETECTED*\n\n`;
+    msg = `📈 ${platformTag}*FORECAST SHIFT DETECTED*\n\n`;
     msg += `📍 ${market.city.toUpperCase()} - ${market.dateStr}\n`;
     msg += `🎯 Forecast: ${forecast.highC}°C / ${forecast.highF}°F (${forecast.confidence})\n`;
 
@@ -175,7 +179,7 @@ function formatTradeAlert(opportunity, positions) {
     msg += `\n💰 Cost: $${totalCost} | Max Payout: $${maxPayout}`;
 
   } else if (strategy === 'precipitation' || opportunity.market?.type === 'precipitation') {
-    msg = `🌧️ *PRECIPITATION OPPORTUNITY*\n\n`;
+    msg = `🌧️ ${platformTag}*PRECIPITATION OPPORTUNITY*\n\n`;
     msg += `📍 ${market.city.toUpperCase()} - ${market.month ? market.month.toUpperCase() : market.dateStr}`;
     if (market.year) msg += ` ${market.year}`;
     msg += `\n`;
@@ -199,7 +203,7 @@ function formatTradeAlert(opportunity, positions) {
     msg += `\n💰 Cost: $${totalCost} | Max Payout: $${maxPayout}`;
 
   } else {
-    msg = `🌡️ *WEATHER OPPORTUNITY*\n\n`;
+    msg = `🌡️ ${platformTag}*WEATHER OPPORTUNITY*\n\n`;
     msg += `📍 ${market.city.toUpperCase()} - ${market.dateStr}\n`;
     msg += `🎯 Forecast: ${forecast.highC}°C / ${forecast.highF}°F (${forecast.confidence})\n`;
     msg += `\n*Strategy:* Range Mispricing\n`;
@@ -312,11 +316,42 @@ class WeatherBot {
 
     // Reset API counter for this cycle
     this.weatherApi.resetStats();
+    this.marketScanner.resetPlatformStats();
 
     try {
       // 1. Get active markets (temperature + precipitation)
-      const tempMarkets = await this.marketScanner.getActiveTemperatureMarkets();
-      const precipMarkets = await this.marketScanner.getActivePrecipitationMarkets();
+      // Use multi-platform scanning if Kalshi is enabled
+      let tempMarkets, precipMarkets, platformData;
+
+      if (CONFIG.KALSHI_ENABLED) {
+        // Multi-platform scan
+        platformData = await this.marketScanner.getAllTemperatureMarkets();
+        tempMarkets = platformData.all.map(m => m._raw || m); // Extract raw markets for compatibility
+        precipMarkets = await this.marketScanner.getActivePrecipitationMarkets();
+
+        // Log platform comparison
+        log('info', `Multi-platform scan: ${platformData.polymarketOnly.length} PM-only, ${platformData.kalshiOnly.length} KL-only, ${platformData.overlap.length} overlap`);
+
+        // Log price comparisons for overlap markets
+        if (platformData.comparisons.length > 0) {
+          for (const comp of platformData.comparisons.slice(0, 3)) { // Log first 3
+            const rangeComps = comp.rangeComparisons.slice(0, 2);
+            for (const rc of rangeComps) {
+              log('info', `Price comparison: ${comp.city} ${comp.dateStr} ${rc.polyLabel}`, {
+                polymarket: (rc.polyPrice * 100).toFixed(0) + '¢',
+                kalshi: (rc.kalshiPrice * 100).toFixed(0) + '¢',
+                diff: (rc.priceDiffPct).toFixed(1) + '%',
+                best: rc.bestPlatform,
+              });
+            }
+          }
+        }
+      } else {
+        // Polymarket-only scan (original behavior)
+        tempMarkets = await this.marketScanner.getActiveTemperatureMarkets();
+        precipMarkets = await this.marketScanner.getActivePrecipitationMarkets();
+      }
+
       const markets = tempMarkets; // Keep for backwards compatibility below
 
       log('info', `Found ${tempMarkets.length} temperature markets, ${precipMarkets.length} precipitation markets`);
