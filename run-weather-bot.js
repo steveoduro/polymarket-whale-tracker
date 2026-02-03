@@ -162,6 +162,30 @@ function formatTradeAlert(opportunity, positions) {
 
     msg += `\n💰 Cost: $${totalCost} | Max Payout: $${maxPayout}`;
 
+  } else if (strategy === 'precipitation' || opportunity.market?.type === 'precipitation') {
+    msg = `🌧️ *PRECIPITATION OPPORTUNITY*\n\n`;
+    msg += `📍 ${market.city.toUpperCase()} - ${market.month ? market.month.toUpperCase() : market.dateStr}`;
+    if (market.year) msg += ` ${market.year}`;
+    msg += `\n`;
+
+    if (forecast && forecast.estimatedMonthlyInches !== undefined) {
+      msg += `🎯 Forecast: ${forecast.estimatedMonthlyInches.toFixed(1)}" total precipitation`;
+      if (forecast.confidence) msg += ` (${forecast.confidence})`;
+      msg += `\n`;
+    }
+
+    msg += `\n*Strategy:* Precipitation Mispricing\n`;
+    msg += `*Market Analysis:*\n`;
+    msg += `  Total probability: ${((opportunity.totalProbability || 0) * 100).toFixed(1)}%\n`;
+    msg += `  Edge: ${(opportunity.mispricingPct || 0).toFixed(1)}%\n\n`;
+    msg += `*Position (Paper):*\n`;
+
+    for (const pos of positions.positions) {
+      msg += `  Buy ${pos.range}: $${pos.amount.toFixed(2)} @ ${(pos.price * 100).toFixed(0)}¢\n`;
+    }
+
+    msg += `\n💰 Cost: $${totalCost} | Max Payout: $${maxPayout}`;
+
   } else {
     msg = `🌡️ *WEATHER OPPORTUNITY*\n\n`;
     msg += `📍 ${market.city.toUpperCase()} - ${market.dateStr}\n`;
@@ -232,6 +256,8 @@ class WeatherBot {
     this.scanInterval = null;
     this.resolveInterval = null;
     this.lastScanTime = null;
+    this.previousMarketCount = null; // For market drop alerts
+    this.scanCount = 0; // For periodic discovery checks
   }
 
   async initialize() {
@@ -261,6 +287,29 @@ class WeatherBot {
 
       log('info', `Found ${tempMarkets.length} temperature markets, ${precipMarkets.length} precipitation markets`);
 
+      // Check for market count drop (possible slug format change)
+      const totalMarkets = tempMarkets.length + precipMarkets.length;
+      if (this.previousMarketCount !== null) {
+        const dropPct = (this.previousMarketCount - totalMarkets) / this.previousMarketCount;
+        if (dropPct > 0.5 && this.previousMarketCount > 5) {
+          const alertMsg = `⚠️ *MARKET DROP ALERT*\n\n` +
+            `Markets found: ${totalMarkets} (was ${this.previousMarketCount})\n` +
+            `Drop: ${(dropPct * 100).toFixed(0)}%\n\n` +
+            `Possible causes:\n` +
+            `- Polymarket changed slug format\n` +
+            `- Markets not created yet\n` +
+            `- API issue\n\n` +
+            `Bot will continue scanning but may not find opportunities.`;
+          await sendTelegram(alertMsg);
+          log('warn', 'Market count dropped significantly', {
+            previous: this.previousMarketCount,
+            current: totalMarkets,
+            dropPct: (dropPct * 100).toFixed(0) + '%'
+          });
+        }
+      }
+      this.previousMarketCount = totalMarkets;
+
       // 2. Filter for active cities and valid dates
       const today = new Date();
       const validMarkets = markets.filter(m => {
@@ -272,6 +321,11 @@ class WeatherBot {
       });
 
       log('info', `${validMarkets.length} markets match city/date filters`);
+
+      // Warn if all markets were filtered out
+      if (validMarkets.length === 0 && totalMarkets > 0) {
+        log('warn', 'All temperature markets filtered out - check date/closed filters');
+      }
 
       // 3. Check each market for opportunities (BOTH strategies)
       const rangeMispricingOpps = [];
@@ -392,6 +446,12 @@ class WeatherBot {
       // 4. Analyze precipitation markets
       const precipitationOpps = [];
       for (const market of precipMarkets) {
+        // Skip closed/resolved markets
+        if (market.closed) {
+          log('info', `Skipping closed precipitation market: ${market.slug}`);
+          continue;
+        }
+
         // Skip illiquid markets (>50% avg spread)
         if (!market.hasLiquidity) {
           log('info', `Skipping illiquid precipitation market: ${market.slug}`, {
@@ -511,6 +571,19 @@ class WeatherBot {
         executed: executed,
         apiCalls: apiStats.requestCount,
       });
+
+      // Periodic slug discovery check (every 12 cycles = ~1 hour at 5-min intervals)
+      this.scanCount++;
+      if (this.scanCount % 12 === 0) {
+        const discovery = await this.marketScanner.discoverWeatherMarkets();
+        if (discovery && discovery.unknown > 0) {
+          const alertMsg = `🔍 *SLUG DISCOVERY ALERT*\n\n` +
+            `Found ${discovery.unknown} weather markets with unexpected slug patterns.\n` +
+            `Check logs for details - slug format may have changed.`;
+          await sendTelegram(alertMsg);
+          log('warn', 'Slug discovery found unknown patterns', discovery);
+        }
+      }
 
     } catch (err) {
       log('error', 'Scan cycle failed', { error: err.message });
