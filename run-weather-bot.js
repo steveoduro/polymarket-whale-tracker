@@ -1018,11 +1018,14 @@ async function scanOnly() {
     const opp = detector.analyzeMarket(market, forecast);
     if (opp) {
       mispricingCount++;
-      // Calculate Kelly size for display
+      // Calculate Kelly size for display (with fee adjustment)
+      const platform = market.platform || 'polymarket';
+      const fee = platform === 'kalshi' ? 0.012 : 0.0315;
       const kelly = detector.calculateKellySize(
         opp.marketProbability,
         opp.trueProbability,
-        CONFIG.PAPER_BANKROLL
+        CONFIG.PAPER_BANKROLL,
+        fee
       );
 
       console.log(`\n📊 OPPORTUNITY: ${market.city.toUpperCase()} - ${market.dateStr}`);
@@ -1100,11 +1103,14 @@ async function scanOnly() {
     const opp = detector.analyzePrecipitationMarket(market, forecast);
     if (opp) {
       precipCount++;
-      // Calculate Kelly size for display
+      // Calculate Kelly size for display (with fee adjustment)
+      const platform = market.platform || 'polymarket';
+      const fee = platform === 'kalshi' ? 0.012 : 0.0315;
       const kelly = detector.calculateKellySize(
         opp.marketProbability,
         opp.trueProbability,
-        CONFIG.PAPER_BANKROLL
+        CONFIG.PAPER_BANKROLL,
+        fee
       );
 
       console.log(`\n🌧️ PRECIPITATION: ${market.city.toUpperCase()} - ${market.month.toUpperCase()} ${market.year}`);
