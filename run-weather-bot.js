@@ -274,6 +274,7 @@ class WeatherBot {
       supabase: this.supabase,
       paperMode: this.paperMode,
       paperBankroll: CONFIG.PAPER_BANKROLL,
+      kalshiApi: this.marketScanner.getKalshiApi(),
       log,
     });
 
