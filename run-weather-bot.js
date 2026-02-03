@@ -254,6 +254,8 @@ class WeatherBot {
       // Kalshi integration
       kalshiEnabled: CONFIG.KALSHI_ENABLED,
       kalshiDemo: CONFIG.KALSHI_DEMO,
+      kalshiApiKey: CONFIG.KALSHI_API_KEY,
+      kalshiPrivateKeyPath: CONFIG.KALSHI_PRIVATE_KEY_PATH,
       preferredPlatform: CONFIG.PREFERRED_PLATFORM,
       enableArbitrage: CONFIG.ENABLE_CROSS_PLATFORM_ARB,
     });
@@ -298,11 +300,18 @@ class WeatherBot {
 
     // Log Kalshi status
     if (CONFIG.KALSHI_ENABLED) {
+      const kalshiTradingReady = this.marketScanner.isKalshiTradingEnabled();
       log('info', 'Kalshi integration ENABLED', {
         demo: CONFIG.KALSHI_DEMO,
+        tradingEnabled: kalshiTradingReady,
         preferredPlatform: CONFIG.PREFERRED_PLATFORM,
         arbEnabled: CONFIG.ENABLE_CROSS_PLATFORM_ARB,
       });
+      if (kalshiTradingReady) {
+        log('info', 'Kalshi trading credentials loaded - ready for paper trading');
+      } else {
+        log('warn', 'Kalshi trading credentials not configured - market scanning only');
+      }
     } else {
       log('info', 'Kalshi integration disabled - set KALSHI_ENABLED=true to enable');
     }
@@ -566,15 +575,19 @@ class WeatherBot {
       const newShiftOpps = rankedShifts.filter(o => !o.isHedge);
       const allNewOpportunities = [...newShiftOpps, ...rankedMispricing, ...rankedPrecip];
 
-      // Check capital limit (80% max deployed)
+      // Check capital limit (80% max deployed based on CURRENT bankroll including P&L)
       let currentDeployed = await this.trader.getDeployedCapital();
-      const maxDeployable = CONFIG.PAPER_BANKROLL * CONFIG.MAX_DEPLOYED_PCT;
+      const realizedPnl = await this.trader.getTotalRealizedPnl();
+      const currentBankroll = CONFIG.PAPER_BANKROLL + realizedPnl;
+      const maxDeployable = currentBankroll * CONFIG.MAX_DEPLOYED_PCT;
 
       log('info', 'Capital status', {
         deployed: currentDeployed.toFixed(2),
         maxDeployable: maxDeployable.toFixed(2),
         available: (maxDeployable - currentDeployed).toFixed(2),
-        percentDeployed: ((currentDeployed / CONFIG.PAPER_BANKROLL) * 100).toFixed(1) + '%'
+        percentDeployed: ((currentDeployed / currentBankroll) * 100).toFixed(1) + '%',
+        bankroll: currentBankroll.toFixed(2),
+        realizedPnl: realizedPnl.toFixed(2),
       });
 
       let executed = 0;
@@ -597,8 +610,8 @@ class WeatherBot {
         // Don't trade same market twice in one cycle
         if (executedMarkets.has(opp.market.slug)) continue;
 
-        // Calculate position size for this opportunity
-        const positions = this.detector.generatePositions(opp, CONFIG.PAPER_BANKROLL, {
+        // Calculate position size for this opportunity (use current bankroll including P&L)
+        const positions = this.detector.generatePositions(opp, currentBankroll, {
           maxPositionPct: CONFIG.MAX_POSITION_PCT,
         });
 
@@ -901,14 +914,17 @@ async function showStatus() {
   // Forecast accuracy stats
   await showForecastAccuracy(supabase);
 
-  // Capital deployment
+  // Capital deployment (use current bankroll including realized P&L)
   const deployedCapital = open.reduce((sum, t) => sum + parseFloat(t.cost || 0), 0);
-  const maxDeployable = CONFIG.PAPER_BANKROLL * CONFIG.MAX_DEPLOYED_PCT;
+  const currentBankroll = CONFIG.PAPER_BANKROLL + totalPnL;
+  const maxDeployable = currentBankroll * CONFIG.MAX_DEPLOYED_PCT;
   const capitalAvailable = maxDeployable - deployedCapital;
 
   console.log('\n💰 Capital Deployment:');
-  console.log(`   Bankroll: $${CONFIG.PAPER_BANKROLL}`);
-  console.log(`   Deployed: $${deployedCapital.toFixed(2)} / $${maxDeployable.toFixed(2)} (${((deployedCapital / CONFIG.PAPER_BANKROLL) * 100).toFixed(1)}%)`);
+  console.log(`   Initial Bankroll: $${CONFIG.PAPER_BANKROLL}`);
+  console.log(`   Realized P&L: $${totalPnL.toFixed(2)}`);
+  console.log(`   Current Bankroll: $${currentBankroll.toFixed(2)}`);
+  console.log(`   Deployed: $${deployedCapital.toFixed(2)} / $${maxDeployable.toFixed(2)} (${((deployedCapital / currentBankroll) * 100).toFixed(1)}%)`);
   console.log(`   Available: $${capitalAvailable.toFixed(2)}`);
   console.log(`   Open Positions: ${open.length}`);
 
