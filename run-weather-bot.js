@@ -578,7 +578,31 @@ class WeatherBot {
       // Separate hedges from new positions
       const hedgeOpps = rankedShifts.filter(o => o.isHedge);
       const newShiftOpps = rankedShifts.filter(o => !o.isHedge);
-      const allNewOpportunities = [...newShiftOpps, ...rankedMispricing, ...rankedPrecip];
+      const combinedOpportunities = [...newShiftOpps, ...rankedMispricing, ...rankedPrecip];
+
+      // Deduplicate by city+date, keeping the opportunity with highest trade edge
+      // This ensures we only trade one platform per city/date (the better deal)
+      const bestByLocation = new Map();
+      for (const opp of combinedOpportunities) {
+        const dedupKey = `${opp.market.city}:${opp.market.dateStr}`;
+        const existing = bestByLocation.get(dedupKey);
+        const oppEdge = opp.edgePct || 0;
+
+        if (!existing || oppEdge > (existing.edgePct || 0)) {
+          if (existing) {
+            log('info', 'Better platform found for city/date', {
+              city: opp.market.city,
+              date: opp.market.dateStr,
+              selected: opp.market.platform || 'polymarket',
+              selectedEdge: oppEdge.toFixed(1) + '%',
+              skipped: existing.market.platform || 'polymarket',
+              skippedEdge: (existing.edgePct || 0).toFixed(1) + '%'
+            });
+          }
+          bestByLocation.set(dedupKey, opp);
+        }
+      }
+      const allNewOpportunities = Array.from(bestByLocation.values());
 
       // Check capital limit (80% max deployed based on CURRENT bankroll including P&L)
       let currentDeployed = await this.trader.getDeployedCapital();
@@ -600,10 +624,12 @@ class WeatherBot {
 
       // Execute hedges first (no capital limit - they protect existing positions)
       for (const opp of hedgeOpps) {
-        if (executedMarkets.has(opp.market.slug)) continue;
+        // Use city+date for dedup to prevent cross-platform conflicts
+        const hedgeDedupKey = `${opp.market.city}:${opp.market.dateStr}`;
+        if (executedMarkets.has(hedgeDedupKey)) continue;
 
         const result = await this.executeOpportunity(opp);
-        executedMarkets.add(opp.market.slug);
+        executedMarkets.add(hedgeDedupKey);
         if (result && result.cost) {
           currentDeployed += result.cost;
         }
@@ -612,16 +638,18 @@ class WeatherBot {
 
       // Execute new positions (subject to capital limit)
       for (const opp of allNewOpportunities) {
-        // Don't trade same market twice in one cycle
-        if (executedMarkets.has(opp.market.slug)) continue;
+        // Use city+date for dedup to prevent cross-platform conflicts
+        const dedupKey = `${opp.market.city}:${opp.market.dateStr}`;
+        if (executedMarkets.has(dedupKey)) continue;
 
-        // Check minimum edge requirement
-        const edge = opp.mispricingPct || 0;
-        if (edge < CONFIG.MIN_MISPRICING_PCT) {
-          log('info', 'Edge below minimum threshold - skipping', {
+        // Check minimum edge requirement (trade-level edge, not market-level mispricing)
+        const tradeEdge = opp.edgePct || 0;
+        if (tradeEdge < CONFIG.MIN_MISPRICING_PCT) {
+          log('info', 'Trade edge below minimum threshold - skipping', {
             city: opp.market.city,
             date: opp.market.dateStr,
-            edge: edge.toFixed(1) + '%',
+            platform: opp.market.platform || 'polymarket',
+            tradeEdge: tradeEdge.toFixed(1) + '%',
             minRequired: CONFIG.MIN_MISPRICING_PCT + '%'
           });
           continue;
@@ -649,7 +677,7 @@ class WeatherBot {
 
         // Execute the trade
         const result = await this.executeOpportunity(opp);
-        executedMarkets.add(opp.market.slug);
+        executedMarkets.add(dedupKey);
         if (result && result.cost) {
           currentDeployed += result.cost;
         } else {
