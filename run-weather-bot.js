@@ -43,7 +43,7 @@ const CONFIG = {
   HEDGE_RANGES: false,            // Disabled - Kelly sizes individual positions
 
   // Strategy thresholds
-  MIN_MISPRICING_PCT: 2,          // Only trade if 2%+ edge
+  MIN_MISPRICING_PCT: 3,          // Only trade if 3%+ edge
   MIN_RANGE_PRICE: 0.10,          // Range must be at least 10¢ (superseded by MIN_PROBABILITY)
   MAX_RANGE_PRICE: 0.85,          // Don't buy above 85¢
 
@@ -614,6 +614,18 @@ class WeatherBot {
       for (const opp of allNewOpportunities) {
         // Don't trade same market twice in one cycle
         if (executedMarkets.has(opp.market.slug)) continue;
+
+        // Check minimum edge requirement
+        const edge = opp.mispricingPct || 0;
+        if (edge < CONFIG.MIN_MISPRICING_PCT) {
+          log('info', 'Edge below minimum threshold - skipping', {
+            city: opp.market.city,
+            date: opp.market.dateStr,
+            edge: edge.toFixed(1) + '%',
+            minRequired: CONFIG.MIN_MISPRICING_PCT + '%'
+          });
+          continue;
+        }
 
         // Calculate position size for this opportunity (use current bankroll including P&L)
         const positions = this.detector.generatePositions(opp, currentBankroll, {
