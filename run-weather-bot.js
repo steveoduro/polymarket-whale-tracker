@@ -63,6 +63,18 @@ const CONFIG = {
     'seattle', 'ankara', 'wellington'
   ],
 
+  // Kalshi Integration
+  KALSHI_ENABLED: process.env.KALSHI_ENABLED === 'true',
+  KALSHI_DEMO: process.env.KALSHI_DEMO !== 'false',  // Default to demo mode
+  KALSHI_API_KEY: process.env.KALSHI_API_KEY || null,
+  KALSHI_PRIVATE_KEY_PATH: process.env.KALSHI_PRIVATE_KEY_PATH || null,
+  PREFERRED_PLATFORM: process.env.PREFERRED_PLATFORM || 'best_price',  // 'polymarket', 'kalshi', or 'best_price'
+  ENABLE_CROSS_PLATFORM_ARB: process.env.ENABLE_CROSS_PLATFORM_ARB === 'true',
+
+  // Platform fees (for Kelly calculations)
+  POLYMARKET_FEE: 0.0315,  // 3.15% taker fee
+  KALSHI_FEE: 0.012,       // ~1.2% average fee
+
   // Alerts
   TELEGRAM_ON_TRADE: true,
   TELEGRAM_DAILY_SUMMARY: true,
@@ -233,7 +245,14 @@ class WeatherBot {
     );
 
     this.weatherApi = new WeatherAPI({ log });
-    this.marketScanner = new MarketScanner({ log });
+    this.marketScanner = new MarketScanner({
+      log,
+      // Kalshi integration
+      kalshiEnabled: CONFIG.KALSHI_ENABLED,
+      kalshiDemo: CONFIG.KALSHI_DEMO,
+      preferredPlatform: CONFIG.PREFERRED_PLATFORM,
+      enableArbitrage: CONFIG.ENABLE_CROSS_PLATFORM_ARB,
+    });
     this.detector = new MispricingDetector({
       minMispricingPct: CONFIG.MIN_MISPRICING_PCT,
       minRangePrice: CONFIG.MIN_RANGE_PRICE,
@@ -261,12 +280,27 @@ class WeatherBot {
   }
 
   async initialize() {
-    log('info', 'Initializing Weather Bot...', { paperMode: this.paperMode });
+    log('info', 'Initializing Weather Bot...', {
+      paperMode: this.paperMode,
+      kalshiEnabled: CONFIG.KALSHI_ENABLED,
+      preferredPlatform: CONFIG.PREFERRED_PLATFORM,
+    });
 
     // Test DB connection
     const { error } = await this.supabase.from('weather_paper_trades').select('count').limit(1);
     if (error && !error.message.includes('does not exist')) {
       log('warn', 'DB tables may not exist - run schema-weather.sql first');
+    }
+
+    // Log Kalshi status
+    if (CONFIG.KALSHI_ENABLED) {
+      log('info', 'Kalshi integration ENABLED', {
+        demo: CONFIG.KALSHI_DEMO,
+        preferredPlatform: CONFIG.PREFERRED_PLATFORM,
+        arbEnabled: CONFIG.ENABLE_CROSS_PLATFORM_ARB,
+      });
+    } else {
+      log('info', 'Kalshi integration disabled - set KALSHI_ENABLED=true to enable');
     }
 
     log('success', 'Weather Bot initialized');
