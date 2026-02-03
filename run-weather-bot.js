@@ -574,6 +574,21 @@ class WeatherBot {
       log('info', `Strategy 2 (Forecast Arbitrage): ${rankedShifts.length} shift opportunities`);
       log('info', `Strategy 3 (Precipitation): ${rankedPrecip.length} precipitation opportunities`);
 
+      // Log details of each opportunity for debugging
+      for (const opp of rankedMispricing) {
+        log('info', 'Opportunity details', {
+          city: opp.market.city,
+          date: opp.market.dateStr,
+          platform: opp.market.platform || 'polymarket',
+          range: opp.bestRange?.name || 'unknown',
+          price: opp.bestRange?.price?.toFixed(2) || 'N/A',
+          edgePct: (opp.edgePct || 0).toFixed(1) + '%',
+          mispricingPct: (opp.mispricingPct || 0).toFixed(1) + '%',
+          trueProbability: ((opp.trueProbability || 0) * 100).toFixed(1) + '%',
+          minEdgeRequired: CONFIG.MIN_MISPRICING_PCT + '%'
+        });
+      }
+
       // 6. Combine and execute (prioritize hedges first, then shifts, then mispricing)
       // Separate hedges from new positions
       const hedgeOpps = rankedShifts.filter(o => o.isHedge);
