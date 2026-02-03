@@ -267,7 +267,8 @@ class WeatherBot {
         const cityMatch = CONFIG.ACTIVE_CITIES.includes(m.city);
         const dateValid = m.date > today; // Future date only
         const notTooFar = (m.date - today) < 7 * 86400000; // Within 7 days
-        return cityMatch && dateValid && notTooFar;
+        const notClosed = !m.closed; // Exclude closed/resolved markets
+        return cityMatch && dateValid && notTooFar && notClosed;
       });
 
       log('info', `${validMarkets.length} markets match city/date filters`);
