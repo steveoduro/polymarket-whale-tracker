@@ -56,11 +56,15 @@ const CONFIG = {
   SCAN_INTERVAL_MS: 5 * 60 * 1000,       // Scan every 5 minutes
   RESOLUTION_CHECK_MS: 30 * 60 * 1000,   // Check resolutions every 30 min
 
-  // Cities - 12 active Polymarket weather markets
+  // Cities - Polymarket + Kalshi weather markets
   ACTIVE_CITIES: [
+    // Polymarket cities
     'nyc', 'london', 'seoul', 'dallas', 'toronto',
     'miami', 'buenos aires', 'atlanta', 'chicago',
-    'seattle', 'ankara', 'wellington'
+    'seattle', 'ankara', 'wellington',
+    // Kalshi-only cities (US markets, Fahrenheit)
+    'denver', 'houston', 'los angeles', 'philadelphia',
+    'dc', 'las vegas', 'new orleans', 'san francisco', 'austin'
   ],
 
   // Kalshi Integration
