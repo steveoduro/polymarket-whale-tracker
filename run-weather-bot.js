@@ -69,7 +69,7 @@ const CONFIG = {
 
   // Kalshi Integration
   KALSHI_ENABLED: process.env.KALSHI_ENABLED === 'true',
-  KALSHI_DEMO: process.env.KALSHI_DEMO !== 'false',  // Default to demo mode
+  KALSHI_DEMO: process.env.KALSHI_DEMO === 'true',  // Default to production (demo URL doesn't exist)
   KALSHI_API_KEY: process.env.KALSHI_API_KEY || null,
   KALSHI_PRIVATE_KEY_PATH: process.env.KALSHI_PRIVATE_KEY_PATH || null,
   PREFERRED_PLATFORM: process.env.PREFERRED_PLATFORM || 'best_price',  // 'polymarket', 'kalshi', or 'best_price'
