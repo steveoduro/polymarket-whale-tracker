@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - Cross-platform deduplication: now uses city+date instead of slug to prevent contradictory positions on same city/date across Polymarket and Kalshi
+- Cross-cycle deduplication: now checks DB for existing open positions before trading (prevents PM in cycle 1, KL in cycle 2 for same city/date)
 - Edge filter now uses trade-level `edgePct` instead of market-level `mispricingPct`
 - Minimum edge threshold enforced at 3% before trade execution
 - Opportunity saving now works (fixed invalid onConflict constraint)
