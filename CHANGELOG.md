@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 - Cross-platform deduplication: now uses city+date instead of slug to prevent contradictory positions on same city/date across Polymarket and Kalshi
 - Edge filter now uses trade-level `edgePct` instead of market-level `mispricingPct`
 - Minimum edge threshold enforced at 3% before trade execution
+- Opportunity saving now works (fixed invalid onConflict constraint)
 
 ### Changed
 - Precipitation trading disabled (ENABLE_PRECIPITATION: false) - locks capital for full month with weak forecast signal; existing positions resolve normally
