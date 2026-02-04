@@ -18,6 +18,8 @@ All notable changes to this project will be documented in this file.
 - Minimum edge threshold enforced at 3% before trade execution
 - Opportunity saving now works (fixed invalid onConflict constraint)
 - Telegram alerts now show both "Market mispricing" and "Trade edge" for transparency
+- Overround edge inflation: edge/Kelly now calculated using execution price, not normalized price (was overbetting ~1-5% in overround markets)
+- Added logging for empty Kelly positions to debug why valid opportunities skip execution
 
 ### Changed
 - Precipitation trading disabled (ENABLE_PRECIPITATION: false) - locks capital for full month with weak forecast signal; existing positions resolve normally
