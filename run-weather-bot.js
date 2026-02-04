@@ -174,7 +174,8 @@ function formatTradeAlert(opportunity, positions) {
     msg += `\n*Strategy:* Forecast Arbitrage\n`;
     msg += `*Market Analysis:*\n`;
     msg += `  Total probability: ${((opportunity.totalProbability || 0) * 100).toFixed(1)}%\n`;
-    msg += `  Edge: ${(opportunity.mispricingPct || 0).toFixed(1)}%\n\n`;
+    msg += `  Market mispricing: ${(opportunity.mispricingPct || 0).toFixed(1)}%\n`;
+    msg += `  Trade edge: ${(opportunity.edgePct || 0).toFixed(1)}%\n\n`;
     msg += `*Position (Paper):*\n`;
 
     for (const pos of positions.positions) {
@@ -198,7 +199,8 @@ function formatTradeAlert(opportunity, positions) {
     msg += `\n*Strategy:* Precipitation Mispricing\n`;
     msg += `*Market Analysis:*\n`;
     msg += `  Total probability: ${((opportunity.totalProbability || 0) * 100).toFixed(1)}%\n`;
-    msg += `  Edge: ${(opportunity.mispricingPct || 0).toFixed(1)}%\n\n`;
+    msg += `  Market mispricing: ${(opportunity.mispricingPct || 0).toFixed(1)}%\n`;
+    msg += `  Trade edge: ${(opportunity.edgePct || 0).toFixed(1)}%\n\n`;
     msg += `*Position (Paper):*\n`;
 
     for (const pos of positions.positions) {
@@ -214,7 +216,8 @@ function formatTradeAlert(opportunity, positions) {
     msg += `\n*Strategy:* Range Mispricing\n`;
     msg += `*Market Analysis:*\n`;
     msg += `  Total probability: ${((opportunity.totalProbability || 0) * 100).toFixed(1)}%\n`;
-    msg += `  Edge: ${(opportunity.mispricingPct || 0).toFixed(1)}%\n\n`;
+    msg += `  Market mispricing: ${(opportunity.mispricingPct || 0).toFixed(1)}%\n`;
+    msg += `  Trade edge: ${(opportunity.edgePct || 0).toFixed(1)}%\n\n`;
     msg += `*Position (Paper):*\n`;
 
     for (const pos of positions.positions) {
@@ -648,6 +651,24 @@ class WeatherBot {
       let executed = 0;
       const executedMarkets = new Set();
 
+      // Pre-populate with existing open positions to prevent cross-cycle duplicates
+      try {
+        const { data: existingPositions } = await this.supabase
+          .from('weather_paper_trades')
+          .select('city, target_date')
+          .eq('status', 'open');
+
+        if (existingPositions) {
+          for (const pos of existingPositions) {
+            executedMarkets.add(`${pos.city}:${pos.target_date}`);
+          }
+          log('info', `Pre-loaded ${existingPositions.length} existing positions for dedup`);
+        }
+      } catch (err) {
+        log('warn', 'Failed to load existing positions for dedup', { error: err.message });
+        // Non-critical — continue without pre-population, in-cycle dedup still works
+      }
+
       // Execute hedges first (no capital limit - they protect existing positions)
       for (const opp of hedgeOpps) {
         // Use city+date for dedup to prevent cross-platform conflicts
@@ -664,30 +685,9 @@ class WeatherBot {
 
       // Execute new positions (subject to capital limit)
       for (const opp of allNewOpportunities) {
-        // Use city+date for dedup to prevent cross-platform conflicts
+        // Use city+date for dedup to prevent cross-platform and cross-cycle conflicts
         const dedupKey = `${opp.market.city}:${opp.market.dateStr}`;
         if (executedMarkets.has(dedupKey)) continue;
-
-        // Check DB for existing position on this city+date (cross-cycle dedup)
-        const { data: existingPos } = await this.supabase
-          .from('weather_paper_trades')
-          .select('id, platform, range_name')
-          .eq('city', opp.market.city)
-          .eq('target_date', opp.market.dateStr)
-          .eq('status', 'open')
-          .limit(1);
-
-        if (existingPos && existingPos.length > 0) {
-          log('info', 'Already have position for city/date - skipping', {
-            city: opp.market.city,
-            date: opp.market.dateStr,
-            existingPlatform: existingPos[0].platform,
-            existingRange: existingPos[0].range_name,
-            newPlatform: opp.market.platform || 'polymarket'
-          });
-          executedMarkets.add(dedupKey); // Prevent retrying this cycle
-          continue;
-        }
 
         // Check minimum edge requirement (trade-level edge, not market-level mispricing)
         const tradeEdge = opp.edgePct || 0;
