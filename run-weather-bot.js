@@ -289,6 +289,7 @@ class WeatherBot {
     this.lastScanTime = null;
     this.previousMarketCount = null; // For market drop alerts
     this.scanCount = 0; // For periodic discovery checks
+    this.lastSnapshotTime = 0; // For hourly market snapshots
   }
 
   async initialize() {
@@ -393,6 +394,13 @@ class WeatherBot {
         }
       }
       this.previousMarketCount = totalMarkets;
+
+      // Save market snapshots hourly for analytics
+      const SNAPSHOT_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+      if (Date.now() - this.lastSnapshotTime >= SNAPSHOT_INTERVAL_MS) {
+        await this.saveMarketSnapshots(tempMarkets);
+        this.lastSnapshotTime = Date.now();
+      }
 
       // 2. Filter for active cities and valid dates
       const today = new Date();
@@ -817,6 +825,44 @@ class WeatherBot {
 
     // Return cost for capital tracking
     return { cost: positions.totalCost };
+  }
+
+  /**
+   * Save market snapshots for analytics (hourly)
+   */
+  async saveMarketSnapshots(markets) {
+    try {
+      const snapshots = markets.map(m => ({
+        city: m.city,
+        target_date: m.dateStr,
+        platform: m.platform || 'polymarket',
+        market_slug: m.slug,
+        total_probability: m.totalProbability,
+        ranges: JSON.stringify(m.ranges.map(r => ({
+          name: r.name,
+          price: r.price,
+          bid: r.bestBid || null,
+          ask: r.bestAsk || null,
+          spread: r.spread || null,
+          volume: r.volume || null,
+        }))),
+        snapshot_at: new Date().toISOString(),
+      }));
+
+      // Batch insert
+      const { error } = await this.supabase
+        .from('market_snapshots')
+        .insert(snapshots);
+
+      if (error) {
+        log('warn', 'Failed to save market snapshots', { error: error.message });
+      } else {
+        log('info', `Saved ${snapshots.length} market snapshots`);
+      }
+    } catch (err) {
+      log('warn', 'Market snapshot error', { error: err.message });
+      // Non-critical - don't break the scan cycle
+    }
   }
 
   async runResolutionCycle() {
