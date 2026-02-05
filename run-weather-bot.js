@@ -435,9 +435,21 @@ class WeatherBot {
           continue;
         }
 
-        // Get forecast first (needed for both new positions and hedging)
-        const forecast = await this.weatherApi.getForecastForDate(market.city, market.dateStr);
+        // Get forecast from all available sources
+        const forecast = await this.weatherApi.getMultiSourceForecast(market.city, market.dateStr);
         if (!forecast) continue;
+
+        // Log multi-source data (first market per cycle only to reduce noise)
+        if (forecast.sourceCount > 1) {
+          log('info', 'Multi-source forecast', {
+            city: forecast.city,
+            date: forecast.date,
+            sources: Object.keys(forecast.sources),
+            spread: forecast.consensus?.spread + '°F',
+            consensusConf: forecast.consensus?.confidence,
+            finalConf: forecast.confidence,
+          });
+        }
 
         // Save forecast to history (for future shift detection)
         await this.weatherApi.saveForecastHistory(this.supabase, forecast);
@@ -1147,7 +1159,7 @@ async function scanOnly() {
     if (!CONFIG.ACTIVE_CITIES.includes(market.city)) continue;
     if (market.date <= today) continue;
 
-    const forecast = await weatherApi.getForecastForDate(market.city, market.dateStr);
+    const forecast = await weatherApi.getMultiSourceForecast(market.city, market.dateStr);
     if (!forecast) continue;
 
     // Save forecast to history
