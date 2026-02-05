@@ -20,6 +20,8 @@ All notable changes to this project will be documented in this file.
 - Telegram alerts now show both "Market mispricing" and "Trade edge" for transparency
 - Overround edge inflation: edge/Kelly now calculated using execution price, not normalized price (was overbetting ~1-5% in overround markets)
 - Added logging for empty Kelly positions to debug why valid opportunities skip execution
+- Kalshi range parsing: now handles "X° to Y°" format (was only matching Polymarket's "X-Y°F" hyphen format)
+- Added resolution logging showing city, date, platform, range, actualTemp, result for verification
 
 ### Changed
 - Precipitation trading disabled (ENABLE_PRECIPITATION: false) - locks capital for full month with weak forecast signal; existing positions resolve normally
