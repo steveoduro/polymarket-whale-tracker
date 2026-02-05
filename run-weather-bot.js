@@ -43,7 +43,8 @@ const CONFIG = {
   HEDGE_RANGES: false,            // Disabled - Kelly sizes individual positions
 
   // Strategy thresholds
-  MIN_MISPRICING_PCT: 3,          // Only trade if 3%+ edge
+  MIN_MISPRICING_PCT: 3,          // Only trade if 3%+ edge (percentage)
+  MIN_EDGE_DOLLARS: 0.05,         // Only trade if $0.05+ edge per share after fees
   ENABLE_PRECIPITATION: false,    // Disabled: locks capital for full month, weak forecast signal
   MIN_RANGE_PRICE: 0.10,          // Range must be at least 10¢ (superseded by MIN_PROBABILITY)
   MAX_RANGE_PRICE: 0.85,          // Don't buy above 85¢
@@ -710,6 +711,29 @@ class WeatherBot {
             platform: opp.market.platform || 'polymarket',
             tradeEdge: tradeEdge.toFixed(1) + '%',
             minRequired: CONFIG.MIN_MISPRICING_PCT + '%'
+          });
+          continue;
+        }
+
+        // Check minimum dollar edge per share (after fees)
+        const marketPrice = opp.marketProbability || opp.bestRange?.price || 0;
+        const trueProbability = opp.trueProbability || 0;
+        const platform = opp.market.platform || 'polymarket';
+        const feeRate = platform === 'kalshi' ? 0.012 : 0.0315;
+        const grossEdgeDollars = trueProbability - marketPrice;
+        const feeCost = marketPrice * feeRate;
+        const netEdgeDollars = grossEdgeDollars - feeCost;
+
+        if (netEdgeDollars < CONFIG.MIN_EDGE_DOLLARS) {
+          log('info', 'Edge below $0.05/share after fees - skipping', {
+            city: opp.market.city,
+            date: opp.market.dateStr,
+            platform: platform,
+            marketPrice: (marketPrice * 100).toFixed(0) + '¢',
+            grossEdge: '$' + grossEdgeDollars.toFixed(3),
+            feeCost: '$' + feeCost.toFixed(3),
+            netEdge: '$' + netEdgeDollars.toFixed(3),
+            threshold: '$' + CONFIG.MIN_EDGE_DOLLARS.toFixed(2),
           });
           continue;
         }
