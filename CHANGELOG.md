@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
   - Close metrics: closing_price, forecast_temp_at_close, forecast_confidence_at_close
   - New `market_snapshots` table for hourly price history (retained indefinitely)
 - Detailed opportunity logging showing edgePct, mispricingPct, trueProbability for debugging
+- Minimum dollar edge threshold ($0.05/share after fees) to prevent unprofitable trades on cheap ranges
 
 ### Fixed
 - Cross-platform deduplication: now uses city+date instead of slug to prevent contradictory positions on same city/date across Polymarket and Kalshi
