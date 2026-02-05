@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 ## [1.3.0] - 2026-02-04
 
 ### Added
+- Multi-source weather integration for improved forecast accuracy
+  - NWS (National Weather Service) for all US cities - authoritative, free
+  - WeatherAPI.com for all cities globally - free tier 1M requests/month
+  - Consensus-based confidence: sources agree within 1°F = very-high confidence
+  - Accuracy tracking per source to learn which works best per city
+  - Dynamic US city detection (new US cities auto-get NWS, no manual mapping)
 - Analytics metrics for trade quality tracking
   - Entry metrics: bid/ask/spread/liquidity/forecast/edge/kelly_fraction/entry_hour_utc
   - Close metrics: closing_price, forecast_temp_at_close, forecast_confidence_at_close
