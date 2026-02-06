@@ -17,6 +17,12 @@ All notable changes to this project will be documented in this file.
   - New `market_snapshots` table for hourly price history (retained indefinitely)
 - Detailed opportunity logging showing edgePct, mispricingPct, trueProbability for debugging
 - Minimum dollar edge threshold ($0.05/share after fees) to prevent unprofitable trades on cheap ranges
+- Filtered opportunity logging: opportunities skipped by edge filters now saved to database with status='filtered' for post-resolution backtesting
+  - Tracks filter_reason, net_edge_dollars, edge_at_entry
+  - Enables would_have_won analysis after market resolution
+
+### Changed
+- Lowered MIN_EDGE_DOLLARS from $0.05 to $0.03 per share (backtest showed $0.05 blocked 92% of trades, need more data to find optimal threshold)
 
 ### Fixed
 - Cross-platform deduplication: now uses city+date instead of slug to prevent contradictory positions on same city/date across Polymarket and Kalshi
