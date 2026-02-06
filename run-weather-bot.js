@@ -44,7 +44,7 @@ const CONFIG = {
 
   // Strategy thresholds
   MIN_MISPRICING_PCT: 3,          // Only trade if 3%+ edge (percentage)
-  MIN_EDGE_DOLLARS: 0.05,         // Only trade if $0.05+ edge per share after fees
+  MIN_EDGE_DOLLARS: 0.03,         // Only trade if $0.03+ edge per share after fees (lowered from $0.05 for more data)
   ENABLE_PRECIPITATION: false,    // Disabled: locks capital for full month, weak forecast signal
   MIN_RANGE_PRICE: 0.10,          // Range must be at least 10¢ (superseded by MIN_PROBABILITY)
   MAX_RANGE_PRICE: 0.85,          // Don't buy above 85¢
@@ -712,6 +712,20 @@ class WeatherBot {
             tradeEdge: tradeEdge.toFixed(1) + '%',
             minRequired: CONFIG.MIN_MISPRICING_PCT + '%'
           });
+
+          // Log filtered opportunity to database for backtesting
+          try {
+            await this.logFilteredOpportunity(opp, {
+              netEdgeDollars: null,
+              grossEdgeDollars: null,
+              feeCost: null,
+              filterReason: 'edge_pct_below_minimum',
+              threshold: CONFIG.MIN_MISPRICING_PCT
+            });
+          } catch (err) {
+            log('warn', 'Failed to log filtered opportunity', { error: err.message });
+          }
+
           continue;
         }
 
@@ -725,7 +739,7 @@ class WeatherBot {
         const netEdgeDollars = grossEdgeDollars - feeCost;
 
         if (netEdgeDollars < CONFIG.MIN_EDGE_DOLLARS) {
-          log('info', 'Edge below $0.05/share after fees - skipping', {
+          log('info', 'Edge below minimum after fees - skipping', {
             city: opp.market.city,
             date: opp.market.dateStr,
             platform: platform,
@@ -735,6 +749,20 @@ class WeatherBot {
             netEdge: '$' + netEdgeDollars.toFixed(3),
             threshold: '$' + CONFIG.MIN_EDGE_DOLLARS.toFixed(2),
           });
+
+          // Log filtered opportunity to database for backtesting
+          try {
+            await this.logFilteredOpportunity(opp, {
+              netEdgeDollars,
+              grossEdgeDollars,
+              feeCost,
+              filterReason: 'net_edge_below_threshold',
+              threshold: CONFIG.MIN_EDGE_DOLLARS
+            });
+          } catch (err) {
+            log('warn', 'Failed to log filtered opportunity', { error: err.message });
+          }
+
           continue;
         }
 
@@ -811,6 +839,48 @@ class WeatherBot {
 
     } catch (err) {
       log('error', 'Scan cycle failed', { error: err.message });
+    }
+  }
+
+  /**
+   * Log a filtered opportunity to database for backtesting
+   */
+  async logFilteredOpportunity(opp, filterInfo) {
+    if (!this.supabase) return;
+
+    const marketPrice = opp.marketProbability || opp.bestRange?.price || 0;
+    const edgePct = opp.edgePct || 0;
+
+    try {
+      await this.supabase.from('weather_opportunities').upsert({
+        market_slug: opp.market.slug || opp.market.marketSlug,
+        market_question: opp.market.question || `${opp.market.city} ${opp.market.dateStr}`,
+        city: opp.market.city,
+        target_date: opp.market.dateStr,
+        platform: opp.market.platform || 'polymarket',
+        platform_market_id: opp.market.conditionId || opp.market.marketId || null,
+        forecast_high_c: opp.forecast?.highC,
+        forecast_high_f: opp.forecast?.highF,
+        forecast_confidence: opp.confidence,
+        forecast_source: 'open-meteo',
+        ranges: opp.market.ranges || [],
+        total_probability: opp.totalProbability,
+        mispricing_pct: opp.mispricingPct,
+        recommended_range: opp.bestRange?.name,
+        recommended_price: marketPrice,
+        expected_value: opp.expectedValue?.ev,
+        fee_adjusted_ev: opp.expectedValue?.evPct,
+        // Filter tracking fields
+        edge_at_entry: edgePct,
+        net_edge_dollars: filterInfo.netEdgeDollars,
+        filter_reason: filterInfo.filterReason,
+        status: 'filtered'
+      }, {
+        onConflict: 'market_slug,target_date',
+        ignoreDuplicates: false
+      });
+    } catch (err) {
+      log('warn', 'Failed to save filtered opportunity', { error: err.message });
     }
   }
 
