@@ -248,6 +248,35 @@ GROUP BY COALESCE(market_type, 'temperature')
 ORDER BY total_trades DESC;
 
 -- =============================================================================
+-- 8. FIX: International cities stored Celsius in actual_temp_f
+-- =============================================================================
+-- Migration: fix_international_actual_temp_units (2026-02-07)
+-- International cities were storing actual temps in Celsius in the actual_temp_f
+-- column, causing error calculations to be wildly wrong (30-60°F errors).
+-- This converts those values to Fahrenheit and recalculates errors.
+
+UPDATE forecast_accuracy
+SET
+  actual_temp_f = actual_temp_f * 9.0/5.0 + 32,
+  open_meteo_error_f = CASE WHEN open_meteo_forecast_f IS NOT NULL
+                            THEN ABS(open_meteo_forecast_f - (actual_temp_f * 9.0/5.0 + 32))
+                            ELSE NULL END,
+  nws_error_f = CASE WHEN nws_forecast_f IS NOT NULL
+                     THEN ABS(nws_forecast_f - (actual_temp_f * 9.0/5.0 + 32))
+                     ELSE NULL END,
+  weatherapi_error_f = CASE WHEN weatherapi_forecast_f IS NOT NULL
+                            THEN ABS(weatherapi_forecast_f - (actual_temp_f * 9.0/5.0 + 32))
+                            ELSE NULL END,
+  consensus_error_f = CASE WHEN consensus_forecast_f IS NOT NULL
+                           THEN ABS(consensus_forecast_f - (actual_temp_f * 9.0/5.0 + 32))
+                           ELSE NULL END,
+  tomorrow_error_f = CASE WHEN tomorrow_forecast_f IS NOT NULL
+                          THEN ABS(tomorrow_forecast_f - (actual_temp_f * 9.0/5.0 + 32))
+                          ELSE NULL END
+WHERE city IN ('london', 'ankara', 'seoul', 'toronto', 'wellington', 'buenos aires')
+  AND actual_temp_f < 50;  -- Safety: only values that look like Celsius
+
+-- =============================================================================
 -- DONE
 -- =============================================================================
 -- To verify, run:

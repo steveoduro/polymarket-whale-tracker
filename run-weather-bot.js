@@ -862,7 +862,7 @@ class WeatherBot {
         forecast_high_c: opp.forecast?.highC,
         forecast_high_f: opp.forecast?.highF,
         forecast_confidence: opp.confidence,
-        forecast_source: 'open-meteo',
+        forecast_source: opp.forecast?.primarySource || 'open-meteo',
         ranges: opp.market.ranges || [],
         total_probability: opp.totalProbability,
         mispricing_pct: opp.mispricingPct,
