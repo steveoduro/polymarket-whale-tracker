@@ -137,7 +137,7 @@ function formatTradeAlert(opportunity, positions) {
 
   // Platform tag for multi-platform mode
   const platform = market.platform || 'polymarket';
-  const platformTag = platform === 'kalshi' ? '[KL] ' : (CONFIG.KALSHI_ENABLED ? '[PM] ' : '');
+  const platformTag = '[Bot A] ' + (platform === 'kalshi' ? '[KL] ' : (CONFIG.KALSHI_ENABLED ? '[PM] ' : ''));
 
   let msg;
 
@@ -234,7 +234,7 @@ function formatTradeAlert(opportunity, positions) {
 function formatResolutionAlert(result, stats) {
   const { trade, actualTemp, winningRange, won, pnl } = result;
 
-  let msg = `📊 *WEATHER TRADE RESOLVED*\n\n`;
+  let msg = `📊 *[Bot A] TRADE RESOLVED*\n\n`;
   msg += `📍 ${trade.city.toUpperCase()} - ${trade.target_date}\n`;
   msg += `🌡️ Actual High: ${actualTemp}°\n\n`;
   msg += `Result: ${won ? '✅ WON' : '❌ LOST'} (${winningRange || 'unknown'})\n`;
@@ -664,18 +664,22 @@ class WeatherBot {
       let executed = 0;
       const executedMarkets = new Set();
 
-      // Pre-populate with existing open positions to prevent cross-cycle duplicates
+      // Pre-populate with existing positions to prevent cross-cycle duplicates
+      // Includes 'exited' positions (Bot B exits) — only re-enter a city/date
+      // once ALL positions have fully resolved (won/lost)
       try {
         const { data: existingPositions } = await this.supabase
           .from('weather_paper_trades')
-          .select('city, target_date')
-          .eq('status', 'open');
+          .select('city, target_date, status')
+          .not('status', 'in', '("won","lost")');
 
         if (existingPositions) {
           for (const pos of existingPositions) {
             executedMarkets.add(`${pos.city}:${pos.target_date}`);
           }
-          log('info', `Pre-loaded ${existingPositions.length} existing positions for dedup`);
+          const openCount = existingPositions.filter(p => p.status === 'open').length;
+          const exitedCount = existingPositions.filter(p => p.status === 'exited').length;
+          log('info', `Pre-loaded ${existingPositions.length} positions for dedup (${openCount} open, ${exitedCount} Bot B exited)`);
         }
       } catch (err) {
         log('warn', 'Failed to load existing positions for dedup', { error: err.message });
@@ -1461,7 +1465,7 @@ async function runBot(liveMode = false) {
   await bot.initialize();
 
   await sendTelegram(
-    `🌡️ *Weather Bot Started*\n` +
+    `🌡️ *[Bot A] Weather Bot Started*\n` +
     `Mode: ${paperMode ? 'Paper 📝' : 'Live 💰'}\n` +
     `Capital: $${CONFIG.PAPER_BANKROLL}\n` +
     `Cities: ${CONFIG.ACTIVE_CITIES.length}`
@@ -1476,7 +1480,7 @@ async function runBot(liveMode = false) {
 
     const stats = await bot.getStats();
     await sendTelegram(
-      `🛑 *Weather Bot Stopped*\n` +
+      `🛑 *[Bot A] Weather Bot Stopped*\n` +
       `Trades: ${stats.totalTrades || 0}\n` +
       `P&L: $${(stats.totalPnL || 0).toFixed(2)}\n` +
       `Win Rate: ${stats.winRate || 'N/A'}`

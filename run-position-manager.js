@@ -38,6 +38,7 @@ const CONFIG = {
   // Forecast Shift Exit
   FORECAST_EXIT_ENABLED: true,
   FORECAST_EXIT_MIN_DAYS: 1,  // Only exit on forecast shift if 1+ day remaining
+  FORECAST_EXIT_MIN_BID: 0.15,  // Don't forecast-exit if bid < 15¢ (nothing to save)
 
   // Re-entry after exit
   REENTRY_ENABLED: true,
@@ -206,7 +207,7 @@ async function main() {
     clearInterval(scanInterval);
     clearInterval(resolveInterval);
 
-    await sendTelegram(`🛑 *Position Manager Stopped* (${signal})`);
+    await sendTelegram(`🛑 *[Bot B] Position Manager Stopped* (${signal})`);
     process.exit(0);
   };
 
@@ -214,7 +215,7 @@ async function main() {
   process.on('SIGINT', () => shutdown('SIGINT'));
 
   await sendTelegram(
-    `📊 *Position Manager Started*\n` +
+    `📊 *[Bot B] Position Manager Started*\n` +
     `Take Profit: LONGSHOT→75¢ / MID→55¢ / FAV→85¢\n` +
     `Forecast Exit: ON\n` +
     `Re-entry: ON`
