@@ -738,7 +738,10 @@ class WeatherBot {
         const feeCost = marketPrice * feeRate;
         const netEdgeDollars = grossEdgeDollars - feeCost;
 
-        if (netEdgeDollars < CONFIG.MIN_EDGE_DOLLARS) {
+        // Tiered edge threshold: longshots (<25¢) use lower bar
+        const minEdgeDollars = marketPrice < 0.25 ? 0.01 : CONFIG.MIN_EDGE_DOLLARS;
+
+        if (netEdgeDollars < minEdgeDollars) {
           log('info', 'Edge below minimum after fees - skipping', {
             city: opp.market.city,
             date: opp.market.dateStr,
@@ -747,7 +750,8 @@ class WeatherBot {
             grossEdge: '$' + grossEdgeDollars.toFixed(3),
             feeCost: '$' + feeCost.toFixed(3),
             netEdge: '$' + netEdgeDollars.toFixed(3),
-            threshold: '$' + CONFIG.MIN_EDGE_DOLLARS.toFixed(2),
+            threshold: '$' + minEdgeDollars.toFixed(2),
+            tier: marketPrice < 0.25 ? 'longshot' : 'standard',
           });
 
           // Log filtered opportunity to database for backtesting
@@ -757,7 +761,7 @@ class WeatherBot {
               grossEdgeDollars,
               feeCost,
               filterReason: 'net_edge_below_threshold',
-              threshold: CONFIG.MIN_EDGE_DOLLARS
+              threshold: minEdgeDollars
             });
           } catch (err) {
             log('warn', 'Failed to log filtered opportunity', { error: err.message });
