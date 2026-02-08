@@ -35,7 +35,7 @@ const CONFIG = {
   // Risk Management (Kelly Criterion)
   MIN_PROBABILITY: parseFloat(process.env.MIN_PROBABILITY) || 0.20,  // Only trade ranges ≥20% probability
   KELLY_FRACTION: parseFloat(process.env.KELLY_FRACTION) || 0.5,     // Half Kelly (conservative)
-  MAX_POSITION_PCT: parseFloat(process.env.MAX_POSITION_PERCENT) || 0.10,  // Max 10% of bankroll per position
+  MAX_POSITION_PCT: parseFloat(process.env.MAX_POSITION_PERCENT) || 0.20,  // Max 20% of bankroll per position
   MIN_BET_SIZE: parseFloat(process.env.MIN_BET_SIZE) || 10,          // Minimum $10 per trade
 
   // Legacy settings (now calculated via Kelly, kept for reference)
@@ -70,7 +70,7 @@ const CONFIG = {
   ],
 
   // Kalshi Integration
-  KALSHI_ENABLED: process.env.KALSHI_ENABLED === 'true',
+  KALSHI_ENABLED: false,  // Disabled: 13% win rate, -$203 P&L over 56 trades
   KALSHI_DEMO: process.env.KALSHI_DEMO === 'true',  // Default to production (demo URL doesn't exist)
   KALSHI_API_KEY: process.env.KALSHI_API_KEY || null,
   KALSHI_PRIVATE_KEY_PATH: process.env.KALSHI_PRIVATE_KEY_PATH || null,
@@ -766,6 +766,38 @@ class WeatherBot {
           continue;
         }
 
+        // "Death Zone" filter: block 25-50¢ trades within 1 day of resolution
+        const entryPrice = opp.bestRange?.price || opp.marketProbability || 0;
+        const targetDate = new Date(opp.market.dateStr + 'T00:00:00Z');
+        const now = new Date();
+        const daysBeforeResolution = Math.ceil((targetDate - now) / (1000 * 60 * 60 * 24));
+
+        if (daysBeforeResolution < 2 && entryPrice >= 0.25 && entryPrice < 0.50) {
+          log('info', 'Death zone filter - skipping (25-50¢ within 1 day of resolution)', {
+            city: opp.market.city,
+            date: opp.market.dateStr,
+            platform: platform,
+            entryPrice: (entryPrice * 100).toFixed(0) + '¢',
+            daysBeforeResolution,
+          });
+
+          try {
+            await this.logFilteredOpportunity(opp, {
+              netEdgeDollars,
+              grossEdgeDollars,
+              feeCost,
+              filterReason: 'death_zone_price_timing',
+              entryPrice,
+              daysBeforeResolution,
+              threshold: null,
+            });
+          } catch (err) {
+            log('warn', 'Failed to log filtered opportunity', { error: err.message });
+          }
+
+          continue;
+        }
+
         // Calculate position size for this opportunity (use current bankroll including P&L)
         const positions = this.detector.generatePositions(opp, currentBankroll, {
           maxPositionPct: CONFIG.MAX_POSITION_PCT,
@@ -874,7 +906,10 @@ class WeatherBot {
         edge_at_entry: edgePct,
         net_edge_dollars: filterInfo.netEdgeDollars,
         filter_reason: filterInfo.filterReason,
-        status: 'filtered'
+        status: 'filtered',
+        // Death zone fields (conditionally included)
+        ...(filterInfo.entryPrice != null && { entry_price: filterInfo.entryPrice }),
+        ...(filterInfo.daysBeforeResolution != null && { days_before_resolution: filterInfo.daysBeforeResolution }),
       }, {
         onConflict: 'market_slug,target_date',
         ignoreDuplicates: false
