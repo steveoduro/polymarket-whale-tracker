@@ -27,9 +27,10 @@ const CONFIG = {
 
   // Take Profit Thresholds - TIERED BY ENTRY PRICE
   TAKE_PROFIT: {
-    LONGSHOT: { maxEntry: 0.25, exitAt: 0.75 },   // Entry <25¢ → exit at 75¢
-    MIDRANGE: { maxEntry: 0.40, exitAt: 0.55 },   // Entry 25-40¢ → exit at 55¢
-    FAVORITE: { maxEntry: 1.00, exitAt: 0.85 },   // Entry 40¢+ → exit at 85¢
+    LONGSHOT: { maxEntry: 0.25, exitAt: 0.75 },          // Entry <25¢ → exit at 75¢
+    MIDRANGE: { maxEntry: 0.40, exitAt: 0.55 },          // Entry 25-40¢ → exit at 55¢
+    FAVORITE: { maxEntry: 0.75, exitAt: 0.85 },          // Entry 40-75¢ → exit at 85¢
+    SUPER_FAVORITE: { maxEntry: 1.00, exitAt: 0.95 },    // Entry 75¢+ → exit at 95¢
   },
 
   // Stop Loss - DISABLED (data shows it hurts: -$78 worse than doing nothing)
@@ -109,7 +110,8 @@ async function main() {
   console.log('Take Profit thresholds:');
   console.log('  LONGSHOT (<25¢): exit at 75¢');
   console.log('  MIDRANGE (25-40¢): exit at 55¢');
-  console.log('  FAVORITE (40¢+): exit at 85¢');
+  console.log('  FAVORITE (40-75¢): exit at 85¢');
+  console.log('  SUPER_FAVORITE (75¢+): exit at 95¢');
   console.log('Stop Loss: DISABLED (data shows harmful)');
   console.log('Forecast Exit: ENABLED');
   console.log('Re-entry: ENABLED');
@@ -216,7 +218,7 @@ async function main() {
 
   await sendTelegram(
     `📊 *[Bot B] Position Manager Started*\n` +
-    `Take Profit: LONGSHOT→75¢ / MID→55¢ / FAV→85¢\n` +
+    `Take Profit: LONG→75¢ / MID→55¢ / FAV→85¢ / SFAV→95¢\n` +
     `Forecast Exit: ON\n` +
     `Re-entry: ON`
   );

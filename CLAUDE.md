@@ -79,7 +79,8 @@ netEdge = grossEdge - feeCost
 |------|------------|----------------|
 | LONGSHOT | < 25¢ | 75¢ |
 | MIDRANGE | 25-40¢ | 55¢ |
-| FAVORITE | 40¢+ | 85¢ |
+| FAVORITE | 40-75¢ | 85¢ |
+| SUPER_FAVORITE | 75¢+ | 95¢ |
 
 Profitability guard: skip take-profit if `netExitPerShare <= entryPrice` (fees can eat thin margins)
 
@@ -88,7 +89,7 @@ NO trading bets AGAINST ranges far from forecast. Integrated into `run-weather-b
 - **Scan**: `scanNoOpportunities(validMarkets)` at end of `runScanCycle()`
 - **Monitor**: `monitorNoPositions()` at end of `runScanCycle()`
 - **Resolve**: `resolveNoTrades()` inside `runResolutionCycle()`
-- Probability: normal distribution with 1.5°C std dev, `normalCDF()` + `calculateRangeProbability()`
+- Probability: normal distribution with 2.5°C std dev, `normalCDF()` + `calculateRangeProbability()`
 - Entry: distance ≥3°C, YES bid ≥18%, edge ≥10%, half Kelly sizing
 - Separate $1,000 bankroll (80% max deployed, 20% max position)
 - Take-profit: NO price ≥ 95¢
