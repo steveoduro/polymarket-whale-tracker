@@ -1395,6 +1395,10 @@ class WeatherBot {
             cost: positionSize,
             shares: shares,
             entry_price: noAsk,
+            entry_bid: yesBid,
+            entry_ask: 1 - yesBid,
+            entry_spread: range.spread || null,
+            entry_volume: range.volume || null,
           });
 
         if (error) {
