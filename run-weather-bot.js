@@ -1417,6 +1417,7 @@ class WeatherBot {
         if (CONFIG.TELEGRAM_ON_TRADE) {
           await sendTelegram(
             `🔻 *[Bot A] NO TRADE*: ${market.city.toUpperCase()} ${range.name}\n` +
+            `Date: ${market.dateStr}\n` +
             `Distance: ${distance.toFixed(1)}°C from forecast (${forecastC.toFixed(1)}°C)\n` +
             `Entry: ${(noAsk * 100).toFixed(0)}¢ NO (${(yesBid * 100).toFixed(0)}¢ YES bid)\n` +
             `Edge: ${edge.toFixed(1)}% | NO prob: ${(noProb * 100).toFixed(0)}%\n` +
@@ -1478,6 +1479,7 @@ class WeatherBot {
 
           await sendTelegram(
             `🎯 *[Bot B] NO TAKE PROFIT*: ${position.city} ${position.range_name}\n` +
+            `Date: ${position.target_date}\n` +
             `Entry: ${(entryPrice * 100).toFixed(0)}¢ → Exit: ${(noBid * 100).toFixed(0)}¢\n` +
             `P&L: $${pnl.toFixed(2)}`
           );
@@ -1523,6 +1525,7 @@ class WeatherBot {
 
                 await sendTelegram(
                   `⚠️ *[Bot B] NO FORECAST EXIT*: ${position.city} ${position.range_name}\n` +
+                  `Date: ${position.target_date}\n` +
                   `Distance dropped to ${distance.toFixed(1)}°C (was ${parseFloat(position.distance_from_range_c).toFixed(1)}°C)\n` +
                   `Entry: ${(entryPrice * 100).toFixed(0)}¢ → Exit: ${(noBid * 100).toFixed(0)}¢\n` +
                   `P&L: $${pnl.toFixed(2)}`
@@ -1619,6 +1622,7 @@ class WeatherBot {
         if (CONFIG.TELEGRAM_ON_TRADE) {
           await sendTelegram(
             `📊 *[Bot A] NO TRADE RESOLVED*: ${position.city} ${position.range_name}\n` +
+            `Date: ${position.target_date}\n` +
             `Actual: ${tempF}°F (${tempC.toFixed(1)}°C)\n` +
             `Range ${landedInRange ? 'HIT → NO ❌ LOST' : 'MISSED → NO ✅ WON'}\n` +
             `P&L: $${pnl.toFixed(2)}`
