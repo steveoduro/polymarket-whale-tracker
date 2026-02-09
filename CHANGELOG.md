@@ -2,6 +2,47 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.0] - 2026-02-09
+
+### Fixed
+- **edge_at_entry lookup bug**: Re-entry edge comparison was querying `weather_opportunities` table which failed when traded range != recommended range (defaulting to 0%, making comparison useless). Now reads `edge_at_entry` directly from the position record.
+- **Re-entries not monitored for exits**: Re-entries in `reentry_trades` were never checked for take-profit or forecast-shift exits — they just held to resolution. Now `getOpenPositions()` fetches from BOTH tables, tags with `_source`, and exit methods update the correct table.
+- **Re-entry chains**: Exited re-entries can now be re-entered with three protections:
+  1. Only `forecast_shift` exits qualify (take-profit already captured value)
+  2. New edge must exceed previous entry's `edge_at_entry`
+  3. Cost capped at 2x the ORIGINAL trade cost (chains back via `original_trade_id`)
+- `executeReentry()` always links new re-entries to the original `weather_paper_trades` record, not the intermediate re-entry
+- `getCurrentPrice()` handles missing `market_slug` on re-entries by looking up from original trade
+- Telegram messages now indicate "(re-entry)" when exiting or re-entering re-entry positions
+
+### Migration
+```sql
+ALTER TABLE reentry_trades
+  ADD COLUMN IF NOT EXISTS market_slug TEXT,
+  ADD COLUMN IF NOT EXISTS managed_by TEXT;
+```
+
+## [2.0.0] - 2026-02-08
+
+### Added
+- **Position Manager (Bot B)** — monitors open positions alongside Bot A
+  - Tiered take-profit: LONGSHOT (<25¢) → exit at 75¢, MIDRANGE (25-40¢) → 55¢, FAVORITE (40¢+) → 85¢
+  - Forecast-shift exits: exit when forecast moves outside traded range (min bid 15¢ threshold)
+  - Re-entry system: re-enter forecast-exited positions when edge returns
+  - Kelly criterion sizing for re-entries with 2x cost cap
+  - New file: `lib/position-manager.js` (core logic)
+  - New file: `run-position-manager.js` (entry point, CONFIG, PM2 process)
+  - PM2 process: `position-manager` (10-minute scan intervals)
+- New tables: `reentry_trades`, `position_manager_logs`
+- Separate P&L tracking for Bot A vs Bot B
+- Telegram alerts tagged `[Bot A]` / `[Bot B]` for clarity
+- Bot A skips re-entry into positions Bot B has exited (checks `status != exited` in dedup)
+
+### Fixed
+- **Duplicate re-entries**: Dedup changed from `original_trade_id` to city+date+range query (Seoul had 4x $217.83 duplicates)
+- **Take-profit at a loss**: Added profitability guard — skip take-profit if `netExitPerShare <= entryPrice` (Dallas 84¢→85¢ lost $2.92 to fees)
+- **Re-entry guardrails**: Added exit-type filter (forecast_shift only), edge comparison vs original, 2x cost cap
+
 ## [1.3.0] - 2026-02-04
 
 ### Added
