@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.0] - 2026-02-09
+
+### Added
+- **NO Trading** — bet against ranges far from forecast
+  - Normal distribution (1.5°C std dev) calculates probability of temp NOT landing in range
+  - Entry filters: 3°C+ distance from forecast, YES bid ≥18%, edge ≥10%
+  - Separate $1,000 bankroll with half Kelly sizing
+  - Capital limits: 80% max deployed, 20% max per position, $10 minimum bet
+  - Bot B monitoring within Bot A's scan cycle: take-profit at NO 95¢, forecast shift exit when distance drops below 2°C
+  - Resolution: NO wins if actual temp did NOT land in the range
+  - Telegram alerts for NO entries and exits
+  - Data stored in `no_opportunities` table with full tracking (distance, probability, edge, P&L)
+
+### Fixed
+- **JSON.stringify bug**: Removed unnecessary `JSON.stringify()` on ranges in `saveMarketSnapshots` — Supabase handles jsonb natively
+
 ## [2.1.0] - 2026-02-09
 
 ### Fixed

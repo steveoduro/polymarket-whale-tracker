@@ -29,6 +29,7 @@ Key tables:
 - `forecast_history` - Historical forecast snapshots
 - `forecast_accuracy` - Tracks which weather source is most accurate per city
 - `market_snapshots` - Hourly price snapshots
+- `no_opportunities` - NO trades (betting against ranges far from forecast, status: open/exited/won/lost)
 
 Important columns:
 - `weather_paper_trades.managed_by` = 'position_manager' when Bot B exits a trade
@@ -81,6 +82,19 @@ netEdge = grossEdge - feeCost
 | FAVORITE | 40¢+ | 85¢ |
 
 Profitability guard: skip take-profit if `netExitPerShare <= entryPrice` (fees can eat thin margins)
+
+### NO Trading (in Bot A's scan cycle)
+NO trading bets AGAINST ranges far from forecast. Integrated into `run-weather-bot.js`:
+- **Scan**: `scanNoOpportunities(validMarkets)` at end of `runScanCycle()`
+- **Monitor**: `monitorNoPositions()` at end of `runScanCycle()`
+- **Resolve**: `resolveNoTrades()` inside `runResolutionCycle()`
+- Probability: normal distribution with 1.5°C std dev, `normalCDF()` + `calculateRangeProbability()`
+- Entry: distance ≥3°C, YES bid ≥18%, edge ≥10%, half Kelly sizing
+- Separate $1,000 bankroll (80% max deployed, 20% max position)
+- Take-profit: NO price ≥ 95¢
+- Forecast exit: distance drops < 2°C with ≥1 day to resolution and NO bid ≥ 70¢
+- Table: `no_opportunities` (status: open, exited, won, lost)
+- NO price derivation: `NO ask = 1 - YES bid`, `NO bid = 1 - YES ask`
 
 ### Multi-Source Weather
 - Open-Meteo: Primary source, global
