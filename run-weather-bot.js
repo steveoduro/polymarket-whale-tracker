@@ -96,13 +96,14 @@ const CONFIG = {
     MIN_DISTANCE_C: 3,         // Forecast must be 3°C+ away from range
     MIN_YES_BID: 0.18,         // YES must be ≥18¢ (so NO costs ≤82¢)
     MIN_EDGE_PCT: 10,          // ≥10% edge required
-    FORECAST_STD_DEV_C: 1.5,   // Normal distribution std dev for forecast error
+    FORECAST_STD_DEV_C: 2.5,   // More conservative based on actual forecast errors
     // NO Bot B settings
     TAKE_PROFIT_NO_PRICE: 0.95,        // Exit when NO reaches 95¢
     FORECAST_EXIT_MIN_DISTANCE_C: 2,   // Exit if distance drops below 2°C
     FORECAST_EXIT_MIN_NO_BID: 0.70,    // Only exit if NO bid ≥ 70¢
     FORECAST_EXIT_MIN_DAYS: 1,         // Only exit if ≥1 day to resolution
     FEE_RATE: 0.0315,
+    MAX_PER_DATE: 200,         // Max $200 total exposure per resolution date
   },
 };
 
@@ -1341,6 +1342,16 @@ class WeatherBot {
 
         if (existing && existing.length > 0) continue;
 
+        // Check per-date limit
+        const { data: sameDatePositions } = await this.supabase
+          .from('no_opportunities')
+          .select('cost')
+          .eq('target_date', market.dateStr)
+          .eq('status', 'open');
+
+        const sameDateExposure = (sameDatePositions || []).reduce((sum, p) => sum + parseFloat(p.cost || 0), 0);
+        if (sameDateExposure >= CONFIG.NO_TRADING.MAX_PER_DATE) continue;
+
         // Kelly sizing for NO
         const effectivePayout = 1 - CONFIG.NO_TRADING.FEE_RATE;
         const b = (effectivePayout - noAsk) / noAsk;
@@ -1355,6 +1366,9 @@ class WeatherBot {
 
         if (positionSize < CONFIG.NO_TRADING.MIN_BET) continue;
         if (positionSize > remainingCapital) positionSize = remainingCapital;
+        // Cap to stay within per-date limit
+        const dateRemaining = CONFIG.NO_TRADING.MAX_PER_DATE - sameDateExposure;
+        positionSize = Math.min(positionSize, dateRemaining);
         if (positionSize < CONFIG.NO_TRADING.MIN_BET) continue;
 
         const shares = positionSize / noAsk;
