@@ -1279,7 +1279,9 @@ class WeatherBot {
         return title === rangeName || title.replace(/\s+/g, '').toLowerCase() === normalizedRange;
       });
       if (!match) return null;
-      return { bid: parseFloat(match.bestBid) || 0, ask: parseFloat(match.bestAsk) || 1 };
+      const bid = parseFloat(match.bestBid) || 0;
+      const ask = parseFloat(match.bestAsk) || 1;
+      return { bid, ask, spread: ask - bid, volume: parseFloat(match.volume) || 0 };
     } catch { return null; }
   }
 
@@ -1465,9 +1467,12 @@ class WeatherBot {
           const fee = noBid * shares * CONFIG.NO_TRADING.FEE_RATE;
           const pnl = grossProfit - fee;
 
+          const noAskAtExit = 1 - yesPrice.bid;  // NO ask = 1 - YES bid
           await this.supabase.from('no_opportunities').update({
             status: 'exited', exit_reason: 'take_profit',
             exit_price: noBid, exit_time: new Date().toISOString(), pnl,
+            exit_bid: noBid, exit_ask: noAskAtExit,
+            exit_spread: noAskAtExit - noBid, exit_volume: yesPrice.volume,
           }).eq('id', position.id);
 
           log('success', 'NO TAKE PROFIT', {
@@ -1511,9 +1516,12 @@ class WeatherBot {
                 const fee = noBid * shares * CONFIG.NO_TRADING.FEE_RATE;
                 const pnl = grossProfit - fee;
 
+                const noAskFE = 1 - yesPrice.bid;  // NO ask = 1 - YES bid
                 await this.supabase.from('no_opportunities').update({
                   status: 'exited', exit_reason: 'forecast_shift',
                   exit_price: noBid, exit_time: new Date().toISOString(), pnl,
+                  exit_bid: noBid, exit_ask: noAskFE,
+                  exit_spread: noAskFE - noBid, exit_volume: yesPrice.volume,
                 }).eq('id', position.id);
 
                 log('warn', 'NO FORECAST EXIT', {
