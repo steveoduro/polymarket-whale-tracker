@@ -84,6 +84,26 @@ const CONFIG = {
   // Alerts
   TELEGRAM_ON_TRADE: true,
   TELEGRAM_DAILY_SUMMARY: true,
+
+  // NO Trading (bet against distant ranges)
+  NO_TRADING: {
+    ENABLED: true,
+    BANKROLL: 1000,            // Separate from YES bankroll
+    MAX_DEPLOYED_PCT: 0.80,
+    MAX_POSITION_PCT: 0.20,
+    MIN_BET: 10,
+    KELLY_FRACTION: 0.5,
+    MIN_DISTANCE_C: 3,         // Forecast must be 3°C+ away from range
+    MIN_YES_BID: 0.18,         // YES must be ≥18¢ (so NO costs ≤82¢)
+    MIN_EDGE_PCT: 10,          // ≥10% edge required
+    FORECAST_STD_DEV_C: 1.5,   // Normal distribution std dev for forecast error
+    // NO Bot B settings
+    TAKE_PROFIT_NO_PRICE: 0.95,        // Exit when NO reaches 95¢
+    FORECAST_EXIT_MIN_DISTANCE_C: 2,   // Exit if distance drops below 2°C
+    FORECAST_EXIT_MIN_NO_BID: 0.70,    // Only exit if NO bid ≥ 70¢
+    FORECAST_EXIT_MIN_DAYS: 1,         // Only exit if ≥1 day to resolution
+    FEE_RATE: 0.0315,
+  },
 };
 
 // =============================================================================
@@ -877,6 +897,12 @@ class WeatherBot {
         }
       }
 
+      // === NO TRADING: scan for NO opportunities and monitor existing ===
+      if (CONFIG.NO_TRADING.ENABLED) {
+        await this.scanNoOpportunities(validMarkets);
+        await this.monitorNoPositions();
+      }
+
     } catch (err) {
       log('error', 'Scan cycle failed', { error: err.message });
     }
@@ -1022,14 +1048,14 @@ class WeatherBot {
         platform: m.platform || 'polymarket',
         market_slug: m.slug,
         total_probability: m.totalProbability,
-        ranges: JSON.stringify(m.ranges.map(r => ({
+        ranges: m.ranges.map(r => ({
           name: r.name,
           price: r.price,
           bid: r.bestBid || null,
           ask: r.bestAsk || null,
           spread: r.spread || null,
           volume: r.volume || null,
-        }))),
+        })),
         snapshot_at: new Date().toISOString(),
       }));
 
@@ -1070,6 +1096,11 @@ class WeatherBot {
           losses: resolved.filter(r => !r.won).length,
         });
       }
+
+      // === NO TRADING: resolve past-due NO trades ===
+      if (CONFIG.NO_TRADING.ENABLED) {
+        await this.resolveNoTrades();
+      }
     } catch (err) {
       log('error', 'Resolution check failed', { error: err.message });
     }
@@ -1105,6 +1136,484 @@ class WeatherBot {
 
   async getStats() {
     return await this.trader.getStats();
+  }
+
+  // ===========================================================================
+  // NO TRADING - Bet against ranges far from forecast
+  // ===========================================================================
+
+  /**
+   * Standard normal CDF (Abramowitz & Stegun approximation)
+   */
+  normalCDF(x) {
+    const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741;
+    const a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
+    const sign = x < 0 ? -1 : 1;
+    const absX = Math.abs(x) / Math.sqrt(2);
+    const t = 1.0 / (1.0 + p * absX);
+    const y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-absX * absX);
+    return 0.5 * (1.0 + sign * y);
+  }
+
+  /**
+   * Parse range name into bounds in °C for NO probability calculation
+   */
+  parseRangeForNo(rangeName) {
+    const cleaned = rangeName.replace(/Â/g, '');
+    const toC = (f) => (f - 32) * 5 / 9;
+
+    if (cleaned.includes('°C')) {
+      if (/higher|above/i.test(cleaned)) {
+        const n = parseFloat(cleaned.match(/-?[\d.]+/)?.[0]);
+        if (isNaN(n)) return null;
+        return { centerC: n, lowC: n, highC: n + 30, type: 'open_high' };
+      }
+      if (/below/i.test(cleaned)) {
+        const n = parseFloat(cleaned.match(/-?[\d.]+/)?.[0]);
+        if (isNaN(n)) return null;
+        return { centerC: n, lowC: n - 30, highC: n, type: 'open_low' };
+      }
+      const rangeMatch = cleaned.match(/(-?[\d.]+)\s*[-–]\s*(-?[\d.]+)/);
+      if (rangeMatch) {
+        const low = parseFloat(rangeMatch[1]), high = parseFloat(rangeMatch[2]);
+        return { centerC: (low + high) / 2, lowC: low, highC: high, type: 'range' };
+      }
+      const single = cleaned.match(/(-?[\d.]+)\s*°C/);
+      if (single) {
+        const n = parseFloat(single[1]);
+        return { centerC: n, lowC: n - 0.5, highC: n + 0.5, type: 'single' };
+      }
+      return null;
+    }
+
+    // Fahrenheit ranges
+    if (/higher|above/i.test(cleaned)) {
+      const n = parseFloat(cleaned.match(/-?[\d.]+/)?.[0]);
+      if (isNaN(n)) return null;
+      const c = toC(n);
+      return { centerC: c, lowC: c, highC: c + 30, type: 'open_high' };
+    }
+    if (/below/i.test(cleaned)) {
+      const n = parseFloat(cleaned.match(/-?[\d.]+/)?.[0]);
+      if (isNaN(n)) return null;
+      const c = toC(n);
+      return { centerC: c, lowC: c - 30, highC: c, type: 'open_low' };
+    }
+    const rangeMatch = cleaned.match(/(-?[\d.]+)\s*[-–]\s*(-?[\d.]+)/);
+    if (rangeMatch) {
+      const lowC = toC(parseFloat(rangeMatch[1])), highC = toC(parseFloat(rangeMatch[2]));
+      return { centerC: (lowC + highC) / 2, lowC, highC, type: 'range' };
+    }
+    const single = cleaned.match(/(-?[\d.]+)\s*°/);
+    if (single) {
+      const c = toC(parseFloat(single[1]));
+      return { centerC: c, lowC: c - 0.28, highC: c + 0.28, type: 'single' };
+    }
+    return null;
+  }
+
+  /**
+   * Probability that temp lands in range, using normal distribution
+   */
+  calculateRangeProbability(forecastC, rangeInfo, stdDev) {
+    if (rangeInfo.type === 'open_high') {
+      return 1 - this.normalCDF((rangeInfo.lowC - forecastC) / stdDev);
+    }
+    if (rangeInfo.type === 'open_low') {
+      return this.normalCDF((rangeInfo.highC - forecastC) / stdDev);
+    }
+    return this.normalCDF((rangeInfo.highC - forecastC) / stdDev) -
+           this.normalCDF((rangeInfo.lowC - forecastC) / stdDev);
+  }
+
+  /**
+   * Distance from forecast to range (positive = forecast is outside range)
+   */
+  calculateNoDistance(forecastC, rangeInfo) {
+    if (rangeInfo.type === 'open_high') return Math.max(0, rangeInfo.lowC - forecastC);
+    if (rangeInfo.type === 'open_low') return Math.max(0, forecastC - rangeInfo.highC);
+    if (forecastC >= rangeInfo.lowC && forecastC <= rangeInfo.highC) return 0;
+    return forecastC < rangeInfo.lowC ? rangeInfo.lowC - forecastC : forecastC - rangeInfo.highC;
+  }
+
+  /**
+   * NO bankroll status (separate from YES)
+   */
+  async getNoCapitalStatus() {
+    const { data: resolved } = await this.supabase
+      .from('no_opportunities')
+      .select('pnl')
+      .in('status', ['won', 'lost', 'exited']);
+
+    const realizedPnl = (resolved || []).reduce((sum, t) => sum + (parseFloat(t.pnl) || 0), 0);
+    const bankroll = CONFIG.NO_TRADING.BANKROLL + realizedPnl;
+
+    const { data: openPos } = await this.supabase
+      .from('no_opportunities')
+      .select('cost')
+      .eq('status', 'open');
+
+    const deployed = (openPos || []).reduce((sum, t) => sum + (parseFloat(t.cost) || 0), 0);
+    const maxDeployable = bankroll * CONFIG.NO_TRADING.MAX_DEPLOYED_PCT;
+    const available = Math.max(0, maxDeployable - deployed);
+
+    return { bankroll, deployed, available, realizedPnl };
+  }
+
+  /**
+   * Fetch current YES bid/ask from Gamma API for a specific range
+   */
+  async getCurrentYesPrice(marketSlug, rangeName) {
+    try {
+      const resp = await fetch(`https://gamma-api.polymarket.com/events?slug=${encodeURIComponent(marketSlug)}`);
+      if (!resp.ok) return null;
+      const events = await resp.json();
+      if (!events || events.length === 0) return null;
+      const event = events[0];
+      if (!event.markets) return null;
+
+      const normalizedRange = rangeName.replace(/\s+/g, '').toLowerCase();
+      const match = event.markets.find(m => {
+        const title = (m.groupItemTitle || m.question || '');
+        return title === rangeName || title.replace(/\s+/g, '').toLowerCase() === normalizedRange;
+      });
+      if (!match) return null;
+      return { bid: parseFloat(match.bestBid) || 0, ask: parseFloat(match.bestAsk) || 1 };
+    } catch { return null; }
+  }
+
+  /**
+   * Scan for NO opportunities across all valid markets
+   */
+  async scanNoOpportunities(validMarkets) {
+    log('info', '--- NO opportunity scan ---');
+    const { bankroll, deployed, available } = await this.getNoCapitalStatus();
+
+    if (available < CONFIG.NO_TRADING.MIN_BET) {
+      log('info', 'NO trading: insufficient capital', { available: available.toFixed(2) });
+      return;
+    }
+
+    log('info', 'NO capital status', {
+      bankroll: '$' + bankroll.toFixed(2),
+      deployed: '$' + deployed.toFixed(2),
+      available: '$' + available.toFixed(2),
+    });
+
+    let noEntries = 0;
+    let remainingCapital = available;
+
+    for (const market of validMarkets) {
+      if (!market.hasLiquidity) continue;
+
+      const forecast = await this.weatherApi.getMultiSourceForecast(market.city, market.dateStr);
+      if (!forecast) continue;
+
+      const forecastC = (forecast.highF - 32) * 5 / 9;
+
+      for (const range of market.ranges) {
+        const rangeInfo = this.parseRangeForNo(range.name);
+        if (!rangeInfo) continue;
+
+        const distance = this.calculateNoDistance(forecastC, rangeInfo);
+        if (distance < CONFIG.NO_TRADING.MIN_DISTANCE_C) continue;
+
+        const yesBid = parseFloat(range.bestBid) || parseFloat(range.price) || 0;
+        if (yesBid < CONFIG.NO_TRADING.MIN_YES_BID) continue;
+
+        // Calculate NO probability using normal distribution
+        const yesProb = this.calculateRangeProbability(forecastC, rangeInfo, CONFIG.NO_TRADING.FORECAST_STD_DEV_C);
+        const noProb = 1 - yesProb;
+        const noAsk = 1 - yesBid;
+        const edge = (noProb - noAsk) * 100;
+
+        if (edge < CONFIG.NO_TRADING.MIN_EDGE_PCT) continue;
+
+        // Dedup: check for existing open NO position on same city/date/range
+        const { data: existing } = await this.supabase
+          .from('no_opportunities')
+          .select('id')
+          .eq('city', market.city)
+          .eq('target_date', market.dateStr)
+          .eq('range_name', range.name)
+          .eq('status', 'open')
+          .limit(1);
+
+        if (existing && existing.length > 0) continue;
+
+        // Kelly sizing for NO
+        const effectivePayout = 1 - CONFIG.NO_TRADING.FEE_RATE;
+        const b = (effectivePayout - noAsk) / noAsk;
+        const p = noProb;
+        let fullKelly = b > 0 ? (p * b - (1 - p)) / b : 0;
+        fullKelly = Math.max(0, fullKelly);
+
+        let positionSize = Math.min(
+          bankroll * CONFIG.NO_TRADING.MAX_POSITION_PCT,
+          bankroll * fullKelly * CONFIG.NO_TRADING.KELLY_FRACTION
+        );
+
+        if (positionSize < CONFIG.NO_TRADING.MIN_BET) continue;
+        if (positionSize > remainingCapital) positionSize = remainingCapital;
+        if (positionSize < CONFIG.NO_TRADING.MIN_BET) continue;
+
+        const shares = positionSize / noAsk;
+
+        const { error } = await this.supabase
+          .from('no_opportunities')
+          .insert({
+            city: market.city,
+            target_date: market.dateStr,
+            platform: market.platform || 'polymarket',
+            market_slug: market.slug,
+            range_name: range.name,
+            range_center_c: rangeInfo.centerC,
+            yes_bid: yesBid,
+            no_ask: noAsk,
+            spread: (parseFloat(range.bestAsk) || 1) - yesBid,
+            forecast_temp_c: forecastC,
+            distance_from_range_c: distance,
+            our_no_prob: noProb,
+            edge_pct: edge,
+            status: 'open',
+            cost: positionSize,
+            shares: shares,
+            entry_price: noAsk,
+          });
+
+        if (error) {
+          log('error', 'Failed to insert NO trade', { error: error.message });
+          continue;
+        }
+
+        remainingCapital -= positionSize;
+        noEntries++;
+
+        log('trade', 'NO TRADE entered', {
+          city: market.city,
+          date: market.dateStr,
+          range: range.name,
+          distance: distance.toFixed(1) + '°C',
+          noAsk: (noAsk * 100).toFixed(0) + '¢',
+          noProb: (noProb * 100).toFixed(0) + '%',
+          edge: edge.toFixed(1) + '%',
+          cost: '$' + positionSize.toFixed(2),
+        });
+
+        if (CONFIG.TELEGRAM_ON_TRADE) {
+          await sendTelegram(
+            `🔻 *[Bot A] NO TRADE*: ${market.city.toUpperCase()} ${range.name}\n` +
+            `Distance: ${distance.toFixed(1)}°C from forecast (${forecastC.toFixed(1)}°C)\n` +
+            `Entry: ${(noAsk * 100).toFixed(0)}¢ NO (${(yesBid * 100).toFixed(0)}¢ YES bid)\n` +
+            `Edge: ${edge.toFixed(1)}% | NO prob: ${(noProb * 100).toFixed(0)}%\n` +
+            `Cost: $${positionSize.toFixed(2)}`
+          );
+        }
+      }
+    }
+
+    log('info', `NO scan complete: ${noEntries} trades entered`);
+  }
+
+  /**
+   * Monitor open NO positions for take-profit and forecast shift exits
+   */
+  async monitorNoPositions() {
+    const { data: openNo, error } = await this.supabase
+      .from('no_opportunities')
+      .select('*')
+      .eq('status', 'open');
+
+    if (error || !openNo || openNo.length === 0) return;
+
+    log('info', `Monitoring ${openNo.length} open NO positions`);
+
+    for (const position of openNo) {
+      try {
+        const yesPrice = await this.getCurrentYesPrice(position.market_slug, position.range_name);
+        if (!yesPrice) continue;
+
+        // Derive NO prices from YES prices
+        const noBid = 1 - yesPrice.ask;   // What we can sell NO for
+        const entryPrice = parseFloat(position.entry_price);
+        const shares = parseFloat(position.shares);
+
+        // Track max NO price
+        if (!position.max_price_seen || noBid > parseFloat(position.max_price_seen || 0)) {
+          await this.supabase.from('no_opportunities')
+            .update({ max_price_seen: noBid }).eq('id', position.id);
+        }
+
+        // Take profit: NO bid >= 95¢
+        if (noBid >= CONFIG.NO_TRADING.TAKE_PROFIT_NO_PRICE) {
+          const grossProfit = (noBid - entryPrice) * shares;
+          const fee = noBid * shares * CONFIG.NO_TRADING.FEE_RATE;
+          const pnl = grossProfit - fee;
+
+          await this.supabase.from('no_opportunities').update({
+            status: 'exited', exit_reason: 'take_profit',
+            exit_price: noBid, exit_time: new Date().toISOString(), pnl,
+          }).eq('id', position.id);
+
+          log('success', 'NO TAKE PROFIT', {
+            city: position.city, range: position.range_name,
+            entry: (entryPrice * 100).toFixed(0) + '¢',
+            exit: (noBid * 100).toFixed(0) + '¢',
+            pnl: '$' + pnl.toFixed(2),
+          });
+
+          await sendTelegram(
+            `🎯 *[Bot B] NO TAKE PROFIT*: ${position.city} ${position.range_name}\n` +
+            `Entry: ${(entryPrice * 100).toFixed(0)}¢ → Exit: ${(noBid * 100).toFixed(0)}¢\n` +
+            `P&L: $${pnl.toFixed(2)}`
+          );
+          continue;
+        }
+
+        // Forecast shift exit: distance dropped below 2°C
+        const targetDate = position.target_date;
+        const target = new Date(targetDate + 'T00:00:00Z');
+        const daysToResolution = Math.ceil((target - new Date()) / (1000 * 60 * 60 * 24));
+
+        if (daysToResolution >= CONFIG.NO_TRADING.FORECAST_EXIT_MIN_DAYS &&
+            noBid >= CONFIG.NO_TRADING.FORECAST_EXIT_MIN_NO_BID) {
+          const forecast = await this.weatherApi.getMultiSourceForecast(position.city, targetDate);
+          if (forecast) {
+            const forecastC = (forecast.highF - 32) * 5 / 9;
+            const rangeInfo = this.parseRangeForNo(position.range_name);
+            if (rangeInfo) {
+              const distance = this.calculateNoDistance(forecastC, rangeInfo);
+
+              // Track min distance
+              if (!position.min_distance_seen || distance < parseFloat(position.min_distance_seen || 999)) {
+                await this.supabase.from('no_opportunities')
+                  .update({ min_distance_seen: distance }).eq('id', position.id);
+              }
+
+              if (distance < CONFIG.NO_TRADING.FORECAST_EXIT_MIN_DISTANCE_C) {
+                const grossProfit = (noBid - entryPrice) * shares;
+                const fee = noBid * shares * CONFIG.NO_TRADING.FEE_RATE;
+                const pnl = grossProfit - fee;
+
+                await this.supabase.from('no_opportunities').update({
+                  status: 'exited', exit_reason: 'forecast_shift',
+                  exit_price: noBid, exit_time: new Date().toISOString(), pnl,
+                }).eq('id', position.id);
+
+                log('warn', 'NO FORECAST EXIT', {
+                  city: position.city, range: position.range_name,
+                  distance: distance.toFixed(1) + '°C',
+                  prevDistance: parseFloat(position.distance_from_range_c).toFixed(1) + '°C',
+                  pnl: '$' + pnl.toFixed(2),
+                });
+
+                await sendTelegram(
+                  `⚠️ *[Bot B] NO FORECAST EXIT*: ${position.city} ${position.range_name}\n` +
+                  `Distance dropped to ${distance.toFixed(1)}°C (was ${parseFloat(position.distance_from_range_c).toFixed(1)}°C)\n` +
+                  `Entry: ${(entryPrice * 100).toFixed(0)}¢ → Exit: ${(noBid * 100).toFixed(0)}¢\n` +
+                  `P&L: $${pnl.toFixed(2)}`
+                );
+              }
+            }
+          }
+        }
+      } catch (err) {
+        log('error', 'NO monitoring error', { city: position.city, error: err.message });
+      }
+    }
+  }
+
+  /**
+   * Resolve NO trades past their target date
+   */
+  async resolveNoTrades() {
+    const today = new Date().toISOString().split('T')[0];
+    const { data: openNo, error } = await this.supabase
+      .from('no_opportunities')
+      .select('*')
+      .eq('status', 'open')
+      .lt('target_date', today);
+
+    if (error || !openNo || openNo.length === 0) return;
+
+    log('info', `Resolving ${openNo.length} NO trades`);
+
+    for (const position of openNo) {
+      try {
+        const actual = await this.weatherApi.getHistoricalHigh(position.city, position.target_date);
+        if (!actual) {
+          log('warn', 'No actual temp for NO resolution', { city: position.city, date: position.target_date });
+          continue;
+        }
+
+        // Check if actual temp landed in the range
+        const tempF = actual.highF;
+        const tempC = actual.highC || (tempF - 32) * 5 / 9;
+        const cleaned = position.range_name.replace(/Â/g, '');
+        let landedInRange = false;
+
+        if (cleaned.includes('°C')) {
+          if (/higher|above/i.test(cleaned)) {
+            const threshold = parseFloat(cleaned.match(/-?[\d.]+/)?.[0]);
+            landedInRange = !isNaN(threshold) && tempC >= threshold;
+          } else if (/below/i.test(cleaned)) {
+            const threshold = parseFloat(cleaned.match(/-?[\d.]+/)?.[0]);
+            landedInRange = !isNaN(threshold) && tempC <= threshold;
+          } else {
+            const rm = cleaned.match(/(-?[\d.]+)\s*[-–]\s*(-?[\d.]+)/);
+            if (rm) landedInRange = tempC >= parseFloat(rm[1]) && tempC <= parseFloat(rm[2]);
+            else {
+              const s = cleaned.match(/(-?[\d.]+)\s*°C/);
+              if (s) landedInRange = Math.abs(tempC - parseFloat(s[1])) < 0.5;
+            }
+          }
+        } else {
+          if (/higher|above/i.test(cleaned)) {
+            const threshold = parseFloat(cleaned.match(/-?[\d.]+/)?.[0]);
+            landedInRange = !isNaN(threshold) && tempF >= threshold;
+          } else if (/below/i.test(cleaned)) {
+            const threshold = parseFloat(cleaned.match(/-?[\d.]+/)?.[0]);
+            landedInRange = !isNaN(threshold) && tempF <= threshold;
+          } else {
+            const rm = cleaned.match(/(-?[\d.]+)\s*[-–]\s*(-?[\d.]+)/);
+            if (rm) landedInRange = tempF >= parseFloat(rm[1]) && tempF <= parseFloat(rm[2]);
+            else {
+              const s = cleaned.match(/(-?[\d.]+)\s*°/);
+              if (s) landedInRange = Math.abs(tempF - parseFloat(s[1])) < 0.5;
+            }
+          }
+        }
+
+        // NO wins if temp did NOT land in range
+        const won = !landedInRange;
+        const shares = parseFloat(position.shares);
+        const entryPrice = parseFloat(position.entry_price);
+        const pnl = won
+          ? (1 - entryPrice) * shares * (1 - CONFIG.NO_TRADING.FEE_RATE)
+          : -parseFloat(position.cost);
+
+        await this.supabase.from('no_opportunities').update({
+          status: won ? 'won' : 'lost', pnl,
+        }).eq('id', position.id);
+
+        log('info', 'NO trade resolved', {
+          city: position.city, date: position.target_date, range: position.range_name,
+          actual: tempF + '°F (' + tempC.toFixed(1) + '°C)',
+          landedInRange, result: won ? 'WON' : 'LOST', pnl: '$' + pnl.toFixed(2),
+        });
+
+        if (CONFIG.TELEGRAM_ON_TRADE) {
+          await sendTelegram(
+            `📊 *[Bot A] NO TRADE RESOLVED*: ${position.city} ${position.range_name}\n` +
+            `Actual: ${tempF}°F (${tempC.toFixed(1)}°C)\n` +
+            `Range ${landedInRange ? 'HIT → NO ❌ LOST' : 'MISSED → NO ✅ WON'}\n` +
+            `P&L: $${pnl.toFixed(2)}`
+          );
+        }
+      } catch (err) {
+        log('error', 'NO resolution error', { city: position.city, error: err.message });
+      }
+    }
   }
 }
 
