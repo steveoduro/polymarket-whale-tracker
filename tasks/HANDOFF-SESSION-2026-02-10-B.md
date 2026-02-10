@@ -88,10 +88,11 @@ Re-enabled Kalshi weather trading by fixing the resolution source mismatch. Adde
 
 | File | Changes |
 |------|---------|
-| `lib/weather-api.js` | Added `nwsStation`/`polymarketStation` to CITIES config for all US+intl cities; added `getNWSObservationHigh()` method (NWS observations API fetcher); added `getKalshiResolutionHigh()` convenience wrapper with Open-Meteo fallback |
+| `lib/weather-api.js` | Added `nwsStation`/`polymarketStation` to CITIES config; added `getNWSObservationHigh()` + `getKalshiResolutionHigh()`; added `platform` param to `getMultiSourceForecast()` — forces NWS for Kalshi |
 | `lib/weather-trader.js` | Made `resolveTemperatureTrade()` platform-aware: Kalshi→NWS, Polymarket→Open-Meteo; removed misleading warning log |
-| `run-weather-bot.js` | Flipped `KALSHI_ENABLED: true`; made `resolveNoTrades()` platform-aware |
-| `lib/position-manager.js` | Made `resolveReentryTrades()` platform-aware (defensive) |
+| `run-weather-bot.js` | Flipped `KALSHI_ENABLED: true`; made `resolveNoTrades()` platform-aware; passed platform to all `getMultiSourceForecast()` calls; added [PM]/[KL] tags to all Telegram alerts |
+| `lib/position-manager.js` | Made `resolveReentryTrades()` platform-aware; added platform param to `getCurrentForecast()`; added [PM]/[KL] tags to all Telegram alerts |
 
 ### Commits
-- Pending: All changes ready to commit
+1. `5ae49b1` - Fix Kalshi resolution: use NWS observations instead of Open-Meteo
+2. `384e70d` - Add platform-aware forecast selection and platform tags to Telegram
