@@ -67,7 +67,8 @@ const CONFIG = {
     'seattle', 'ankara', 'wellington',
     // Kalshi-only cities (US markets, Fahrenheit)
     'denver', 'houston', 'los angeles', 'philadelphia',
-    'dc', 'las vegas', 'new orleans', 'san francisco', 'austin'
+    'dc', 'las vegas', 'new orleans', 'san francisco', 'austin',
+    'boston', 'phoenix', 'minneapolis'
   ],
 
   // Kalshi Integration
@@ -106,6 +107,24 @@ const CONFIG = {
     FEE_RATE: 0.0315,
     MAX_PER_DATE: 200,         // Max $200 total exposure per resolution date
   },
+};
+
+// Platform-specific trading parameters
+// Kalshi = next-day markets (0-1 days), hold to resolution, no Bot B exit
+// Polymarket = multi-day markets (2-7 days), Bot B can exit early
+const PLATFORM_CONFIG = {
+  polymarket: {
+    MIN_DAYS_BEFORE_RESOLUTION: 2,
+    MAX_DAYS_BEFORE_RESOLUTION: 7,
+    MIN_EDGE_PCT: 3,
+    MIN_FORECAST_CONFIDENCE: null,  // Any confidence OK
+  },
+  kalshi: {
+    MIN_DAYS_BEFORE_RESOLUTION: 0,  // Next-day markets only
+    MAX_DAYS_BEFORE_RESOLUTION: 1,
+    MIN_EDGE_PCT: 4,                // Higher: no Bot B safety net
+    MIN_FORECAST_CONFIDENCE: 'high', // 24h forecasts should be confident
+  }
 };
 
 // =============================================================================
@@ -733,25 +752,28 @@ class WeatherBot {
         const dedupKey = `${opp.market.city}:${opp.market.dateStr}`;
         if (executedMarkets.has(dedupKey)) continue;
 
-        // Check minimum edge requirement (trade-level edge, not market-level mispricing)
+        // Platform-specific config
+        const platform = opp.market.platform || 'polymarket';
+        const platConfig = PLATFORM_CONFIG[platform] || PLATFORM_CONFIG.polymarket;
+
+        // Check minimum edge requirement (platform-specific: Kalshi 4%, Polymarket 3%)
         const tradeEdge = opp.edgePct || 0;
-        if (tradeEdge < CONFIG.MIN_MISPRICING_PCT) {
-          log('info', 'Trade edge below minimum threshold - skipping', {
+        if (tradeEdge < platConfig.MIN_EDGE_PCT) {
+          log('info', 'Trade edge below platform threshold - skipping', {
             city: opp.market.city,
             date: opp.market.dateStr,
-            platform: opp.market.platform || 'polymarket',
+            platform,
             tradeEdge: tradeEdge.toFixed(1) + '%',
-            minRequired: CONFIG.MIN_MISPRICING_PCT + '%'
+            minRequired: platConfig.MIN_EDGE_PCT + '%'
           });
 
-          // Log filtered opportunity to database for backtesting
           try {
             await this.logFilteredOpportunity(opp, {
               netEdgeDollars: null,
               grossEdgeDollars: null,
               feeCost: null,
               filterReason: 'edge_pct_below_minimum',
-              threshold: CONFIG.MIN_MISPRICING_PCT
+              threshold: platConfig.MIN_EDGE_PCT
             });
           } catch (err) {
             log('warn', 'Failed to log filtered opportunity', { error: err.message });
@@ -760,10 +782,41 @@ class WeatherBot {
           continue;
         }
 
+        // Check forecast confidence (Kalshi requires 'high' confidence)
+        if (platConfig.MIN_FORECAST_CONFIDENCE) {
+          const levels = ['low', 'medium', 'high', 'very-high'];
+          const requiredIdx = levels.indexOf(platConfig.MIN_FORECAST_CONFIDENCE);
+          const actualConfidence = opp.confidence || 'low';
+          const actualIdx = levels.indexOf(actualConfidence);
+
+          if (actualIdx < requiredIdx) {
+            log('info', 'Forecast confidence below platform threshold - skipping', {
+              city: opp.market.city,
+              date: opp.market.dateStr,
+              platform,
+              confidence: actualConfidence,
+              required: platConfig.MIN_FORECAST_CONFIDENCE,
+            });
+
+            try {
+              await this.logFilteredOpportunity(opp, {
+                netEdgeDollars: null,
+                grossEdgeDollars: null,
+                feeCost: null,
+                filterReason: 'confidence_below_threshold',
+                threshold: platConfig.MIN_FORECAST_CONFIDENCE,
+              });
+            } catch (err) {
+              log('warn', 'Failed to log filtered opportunity', { error: err.message });
+            }
+
+            continue;
+          }
+        }
+
         // Check minimum dollar edge per share (after fees)
         const marketPrice = opp.marketProbability || opp.bestRange?.price || 0;
         const trueProbability = opp.trueProbability || 0;
-        const platform = opp.market.platform || 'polymarket';
         const feeRate = platform === 'kalshi' ? 0.012 : 0.0315;
         const grossEdgeDollars = trueProbability - marketPrice;
         const feeCost = marketPrice * feeRate;
@@ -801,17 +854,70 @@ class WeatherBot {
           continue;
         }
 
-        // "Death Zone" filter: block 25-50¢ trades within 1 day of resolution
+        // Platform-specific resolution timing filter
         const entryPrice = opp.bestRange?.price || opp.marketProbability || 0;
         const targetDate = new Date(opp.market.dateStr + 'T00:00:00Z');
         const now = new Date();
         const daysBeforeResolution = Math.ceil((targetDate - now) / (1000 * 60 * 60 * 24));
 
-        if (daysBeforeResolution < 2 && entryPrice >= 0.25 && entryPrice < 0.50) {
+        if (daysBeforeResolution < platConfig.MIN_DAYS_BEFORE_RESOLUTION) {
+          log('info', 'Too close to resolution for platform - skipping', {
+            city: opp.market.city,
+            date: opp.market.dateStr,
+            platform,
+            daysBeforeResolution,
+            minRequired: platConfig.MIN_DAYS_BEFORE_RESOLUTION,
+          });
+
+          try {
+            await this.logFilteredOpportunity(opp, {
+              netEdgeDollars,
+              grossEdgeDollars,
+              feeCost,
+              filterReason: 'too_close_to_resolution',
+              entryPrice,
+              daysBeforeResolution,
+              threshold: platConfig.MIN_DAYS_BEFORE_RESOLUTION,
+            });
+          } catch (err) {
+            log('warn', 'Failed to log filtered opportunity', { error: err.message });
+          }
+
+          continue;
+        }
+
+        if (daysBeforeResolution > platConfig.MAX_DAYS_BEFORE_RESOLUTION) {
+          log('info', 'Too far from resolution for platform - skipping', {
+            city: opp.market.city,
+            date: opp.market.dateStr,
+            platform,
+            daysBeforeResolution,
+            maxAllowed: platConfig.MAX_DAYS_BEFORE_RESOLUTION,
+          });
+
+          try {
+            await this.logFilteredOpportunity(opp, {
+              netEdgeDollars,
+              grossEdgeDollars,
+              feeCost,
+              filterReason: 'too_far_from_resolution',
+              entryPrice,
+              daysBeforeResolution,
+              threshold: platConfig.MAX_DAYS_BEFORE_RESOLUTION,
+            });
+          } catch (err) {
+            log('warn', 'Failed to log filtered opportunity', { error: err.message });
+          }
+
+          continue;
+        }
+
+        // Polymarket death zone: block 25-50¢ within 1 day (safety net)
+        if (platform === 'polymarket' && daysBeforeResolution < 2 && entryPrice >= 0.25 && entryPrice < 0.50) {
           log('info', 'Death zone filter - skipping (25-50¢ within 1 day of resolution)', {
             city: opp.market.city,
             date: opp.market.dateStr,
-            platform: platform,
+            platform,
             entryPrice: (entryPrice * 100).toFixed(0) + '¢',
             daysBeforeResolution,
           });
