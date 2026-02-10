@@ -70,7 +70,7 @@ const CONFIG = {
   ],
 
   // Kalshi Integration
-  KALSHI_ENABLED: false,  // Disabled: 13% win rate, -$203 P&L over 56 trades
+  KALSHI_ENABLED: true,  // Re-enabled: now resolves via NWS observations (matches Kalshi source)
   KALSHI_DEMO: process.env.KALSHI_DEMO === 'true',  // Default to production (demo URL doesn't exist)
   KALSHI_API_KEY: process.env.KALSHI_API_KEY || null,
   KALSHI_PRIVATE_KEY_PATH: process.env.KALSHI_PRIVATE_KEY_PATH || null,
@@ -1606,9 +1606,13 @@ class WeatherBot {
 
     for (const position of openNo) {
       try {
-        const actual = await this.weatherApi.getHistoricalHigh(position.city, position.target_date);
+        // Platform-aware resolution: Kalshi uses NWS, Polymarket uses Open-Meteo
+        const platform = position.platform || 'polymarket';
+        const actual = platform === 'kalshi'
+          ? await this.weatherApi.getKalshiResolutionHigh(position.city, position.target_date)
+          : await this.weatherApi.getHistoricalHigh(position.city, position.target_date);
         if (!actual) {
-          log('warn', 'No actual temp for NO resolution', { city: position.city, date: position.target_date });
+          log('warn', 'No actual temp for NO resolution', { city: position.city, date: position.target_date, platform });
           continue;
         }
 
