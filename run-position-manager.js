@@ -40,6 +40,9 @@ const CONFIG = {
   FORECAST_EXIT_ENABLED: true,
   FORECAST_EXIT_MIN_DAYS: 1,  // Only exit on forecast shift if 1+ day remaining
   FORECAST_EXIT_MIN_BID: 0.15,  // Don't forecast-exit if bid < 15¢ (nothing to save)
+  FORECAST_EXIT_MIN_MARGIN_MULTIPLIER: 1.0,  // Shift must exceed 1x source avg error
+  FORECAST_EXIT_DEFAULT_ERROR_F: 2.0,         // Fallback error if no accuracy data (conservative)
+  FORECAST_EXIT_CONFIRM_CHECKS: 2,            // Require 2 consecutive out-of-range checks
 
   // Re-entry after exit
   REENTRY_ENABLED: true,
@@ -113,7 +116,9 @@ async function main() {
   console.log('  FAVORITE (40-75¢): exit at 85¢');
   console.log('  SUPER_FAVORITE (75¢+): exit at 95¢');
   console.log('Stop Loss: DISABLED (data shows harmful)');
-  console.log('Forecast Exit: ENABLED');
+  console.log('Forecast Exit: ENABLED (two-gate: error margin + stability)');
+  console.log(`  Error margin: ${CONFIG.FORECAST_EXIT_MIN_MARGIN_MULTIPLIER}x source avg error (default ${CONFIG.FORECAST_EXIT_DEFAULT_ERROR_F}°F)`);
+  console.log(`  Stability: ${CONFIG.FORECAST_EXIT_CONFIRM_CHECKS} consecutive checks required`);
   console.log('Re-entry: ENABLED');
   console.log('Scan interval: 10 minutes\n');
 

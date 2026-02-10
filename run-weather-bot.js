@@ -315,6 +315,9 @@ class WeatherBot {
     this.previousMarketCount = null; // For market drop alerts
     this.scanCount = 0; // For periodic discovery checks
     this.lastSnapshotTime = 0; // For hourly market snapshots
+
+    // NO trading stability tracker: positionId → { firstSeen, count }
+    this.noShiftTracker = {};
   }
 
   async initialize() {
@@ -1515,33 +1518,67 @@ class WeatherBot {
                   .update({ min_distance_seen: distance }).eq('id', position.id);
               }
 
-              if (distance < CONFIG.NO_TRADING.FORECAST_EXIT_MIN_DISTANCE_C) {
-                const grossProfit = (noBid - entryPrice) * shares;
-                const fee = noBid * shares * CONFIG.NO_TRADING.FEE_RATE;
-                const pnl = grossProfit - fee;
+              const noKey = `no:${position.id}`;
 
-                const noAskFE = 1 - yesPrice.bid;  // NO ask = 1 - YES bid
-                await this.supabase.from('no_opportunities').update({
-                  status: 'exited', exit_reason: 'forecast_shift',
-                  exit_price: noBid, exit_time: new Date().toISOString(), pnl,
-                  exit_bid: noBid, exit_ask: noAskFE,
-                  exit_spread: noAskFE - noBid, exit_volume: yesPrice.volume,
-                }).eq('id', position.id);
+              if (distance >= CONFIG.NO_TRADING.FORECAST_EXIT_MIN_DISTANCE_C) {
+                // Distance still safe — clear any pending shift tracker
+                if (this.noShiftTracker[noKey]) {
+                  log('info', 'NO distance back above threshold — shift cleared', {
+                    city: position.city, range: position.range_name,
+                    distance: distance.toFixed(1) + '°C',
+                  });
+                  delete this.noShiftTracker[noKey];
+                }
+              } else {
+                // Distance dropped below threshold — stability gate
+                if (!this.noShiftTracker[noKey]) {
+                  this.noShiftTracker[noKey] = { firstSeen: Date.now(), count: 1 };
+                  log('info', 'NO forecast shift detected — waiting for confirmation', {
+                    city: position.city, range: position.range_name,
+                    distance: distance.toFixed(1) + '°C',
+                    check: '1/2',
+                  });
+                } else {
+                  this.noShiftTracker[noKey].count++;
 
-                log('warn', 'NO FORECAST EXIT', {
-                  city: position.city, range: position.range_name,
-                  distance: distance.toFixed(1) + '°C',
-                  prevDistance: parseFloat(position.distance_from_range_c).toFixed(1) + '°C',
-                  pnl: '$' + pnl.toFixed(2),
-                });
+                  if (this.noShiftTracker[noKey].count < 2) {
+                    log('info', 'NO forecast shift persists — still confirming', {
+                      city: position.city, range: position.range_name,
+                      distance: distance.toFixed(1) + '°C',
+                      check: `${this.noShiftTracker[noKey].count}/2`,
+                    });
+                  } else {
+                    // Shift confirmed — execute NO forecast exit
+                    delete this.noShiftTracker[noKey];
 
-                await sendTelegram(
-                  `⚠️ *[Bot B] NO FORECAST EXIT*: ${position.city} ${position.range_name}\n` +
-                  `Date: ${position.target_date}\n` +
-                  `Distance dropped to ${distance.toFixed(1)}°C (was ${parseFloat(position.distance_from_range_c).toFixed(1)}°C)\n` +
-                  `Entry: ${(entryPrice * 100).toFixed(0)}¢ → Exit: ${(noBid * 100).toFixed(0)}¢\n` +
-                  `P&L: $${pnl.toFixed(2)}`
-                );
+                    const grossProfit = (noBid - entryPrice) * shares;
+                    const fee = noBid * shares * CONFIG.NO_TRADING.FEE_RATE;
+                    const pnl = grossProfit - fee;
+
+                    const noAskFE = 1 - yesPrice.bid;  // NO ask = 1 - YES bid
+                    await this.supabase.from('no_opportunities').update({
+                      status: 'exited', exit_reason: 'forecast_shift',
+                      exit_price: noBid, exit_time: new Date().toISOString(), pnl,
+                      exit_bid: noBid, exit_ask: noAskFE,
+                      exit_spread: noAskFE - noBid, exit_volume: yesPrice.volume,
+                    }).eq('id', position.id);
+
+                    log('warn', 'NO FORECAST EXIT (confirmed)', {
+                      city: position.city, range: position.range_name,
+                      distance: distance.toFixed(1) + '°C',
+                      prevDistance: parseFloat(position.distance_from_range_c).toFixed(1) + '°C',
+                      pnl: '$' + pnl.toFixed(2),
+                    });
+
+                    await sendTelegram(
+                      `⚠️ *[Bot A] NO FORECAST EXIT (confirmed)*: ${position.city} ${position.range_name}\n` +
+                      `Date: ${position.target_date}\n` +
+                      `Distance dropped to ${distance.toFixed(1)}°C (was ${parseFloat(position.distance_from_range_c).toFixed(1)}°C)\n` +
+                      `Entry: ${(entryPrice * 100).toFixed(0)}¢ → Exit: ${(noBid * 100).toFixed(0)}¢\n` +
+                      `P&L: $${pnl.toFixed(2)}`
+                    );
+                  }
+                }
               }
             }
           }
