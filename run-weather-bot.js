@@ -19,6 +19,7 @@ const { MarketScanner } = require('./lib/market-scanner');
 const { MispricingDetector } = require('./lib/mispricing-detector');
 const { WeatherTrader } = require('./lib/weather-trader');
 const { PolymarketAPI } = require('./lib/polymarket-api');
+const { WEATHER_SERIES } = require('./lib/kalshi-api');
 
 // =============================================================================
 // CONFIGURATION
@@ -1112,6 +1113,117 @@ class WeatherBot {
     }
   }
 
+  // =========================================================================
+  // WEEKLY PLATFORM INTELLIGENCE REPORT
+  // =========================================================================
+
+  async checkWeeklyReport() {
+    const now = new Date();
+    const isMonday = now.getUTCDay() === 1;
+    const hour = now.getUTCHours();
+    const today = now.toISOString().slice(0, 10);
+
+    if (isMonday && hour >= 10 && hour < 11 && this.lastWeeklyReport !== today) {
+      this.lastWeeklyReport = today;
+      try {
+        await this.runWeeklyReport();
+      } catch (err) {
+        log('error', 'Weekly report failed', { error: err.message });
+      }
+    }
+  }
+
+  async runWeeklyReport() {
+    log('info', '=== Running weekly platform intelligence report ===');
+    const sections = [];
+    const now = new Date();
+    const weekAgo = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    // Section 1: Kalshi Series Discovery
+    try {
+      const allSeries = await this.marketScanner.getKalshiApi()?.discoverWeatherSeries() || [];
+      const allLiveTickers = new Set(allSeries.map(s => s.ticker));
+      const knownTickers = new Set(Object.values(WEATHER_SERIES).map(s => s.series));
+
+      // Missing: our known tickers not found in Kalshi API
+      const missing = [...knownTickers].filter(t => !allLiveTickers.has(t));
+
+      // New: KXHIGH* tickers not in our config (potential new city markets)
+      const excludePatterns = ['INFLATION', 'MOV', 'INX', 'US', 'NFL', 'MODEL', 'MAXTEMP', 'DV'];
+      const newSeries = allSeries.filter(s =>
+        s.ticker?.startsWith('KXHIGH') &&
+        !knownTickers.has(s.ticker) &&
+        !excludePatterns.some(p => s.ticker.includes(p))
+      );
+
+      if (newSeries.length > 0) {
+        sections.push(`🆕 *New Kalshi Series*:\n${newSeries.map(s => `  ${s.ticker} (${s.title || '?'})`).join('\n')}`);
+      }
+      if (missing.length > 0) {
+        sections.push(`⚠️ *Missing Kalshi Series*: ${missing.join(', ')}`);
+      }
+      if (newSeries.length === 0 && missing.length === 0) {
+        sections.push(`✅ *Kalshi Series*: All ${knownTickers.size} tracked, no changes`);
+      }
+      log('info', 'Weekly series check', { liveTotal: allSeries.length, known: knownTickers.size, new: newSeries.length, missing: missing.length });
+    } catch (e) {
+      sections.push(`⚠️ *Series check failed*: ${e.message}`);
+    }
+
+    // Section 2: 7-Day Trade Performance
+    try {
+      const { data: trades } = await this.supabase
+        .from('weather_paper_trades')
+        .select('platform, status, pnl')
+        .gte('created_at', weekAgo);
+
+      const stats = {};
+      (trades || []).forEach(t => {
+        const p = t.platform || 'polymarket';
+        if (!stats[p]) stats[p] = { n: 0, w: 0, l: 0, pnl: 0 };
+        stats[p].n++;
+        if (t.status === 'won') stats[p].w++;
+        if (t.status === 'lost') stats[p].l++;
+        if (t.pnl) stats[p].pnl += t.pnl;
+      });
+
+      const lines = Object.entries(stats)
+        .filter(([, s]) => s.n > 0)
+        .map(([p, s]) => {
+          const tag = p === 'kalshi' ? '[KL]' : '[PM]';
+          const resolved = s.w + s.l;
+          const wr = resolved > 0 ? Math.round(s.w / resolved * 100) : 0;
+          const pnlStr = `${s.pnl >= 0 ? '+' : ''}$${s.pnl.toFixed(2)}`;
+          return `  ${tag} ${s.n} trades | ${s.w}W ${s.l}L (${wr}%) | ${pnlStr}`;
+        });
+
+      sections.push(`📈 *7-Day Performance*:\n${lines.length > 0 ? lines.join('\n') : '  No trades this week'}`);
+    } catch (e) {
+      sections.push(`⚠️ *Trade stats failed*: ${e.message}`);
+    }
+
+    // Section 3: Current Market Coverage
+    try {
+      const merged = await this.marketScanner.getAllTemperatureMarkets();
+      const pmCities = [...new Set((merged.polymarketOnly || []).map(m => m.city))];
+      const klCities = [...new Set((merged.kalshiOnly || []).map(m => m.city))];
+      const overlapCities = [...new Set((merged.overlap || []).map(m => m.city))];
+      sections.push(
+        `🗓️ *Market Coverage*:\n` +
+        `  [PM] ${(merged.polymarketOnly?.length || 0) + (merged.overlap?.length || 0)} mkts, ${pmCities.length + overlapCities.length} cities\n` +
+        `  [KL] ${(merged.kalshiOnly?.length || 0) + (merged.overlap?.length || 0)} mkts, ${klCities.length + overlapCities.length} cities\n` +
+        `  Overlap: ${overlapCities.length > 0 ? overlapCities.join(', ') : 'none'}`
+      );
+    } catch (e) {
+      sections.push(`⚠️ *Market coverage check failed*: ${e.message}`);
+    }
+
+    // Compile and send
+    const report = `📊 *WEEKLY PLATFORM REPORT*\n${now.toISOString().slice(0, 10)}\n\n${sections.join('\n\n')}`;
+    await sendTelegram(report);
+    log('info', 'Weekly platform report sent to Telegram');
+  }
+
   start() {
     if (this.isRunning) {
       log('warn', 'Bot already running');
@@ -1131,11 +1243,17 @@ class WeatherBot {
     // Set up intervals
     this.scanInterval = setInterval(() => this.runScanCycle(), CONFIG.SCAN_INTERVAL_MS);
     this.resolveInterval = setInterval(() => this.runResolutionCycle(), CONFIG.RESOLUTION_CHECK_MS);
+
+    // Weekly platform report — check hourly, fires on Mondays at 10 UTC
+    this.lastWeeklyReport = null;
+    this.weeklyCheckInterval = setInterval(() => this.checkWeeklyReport(), 60 * 60 * 1000);
+    this.checkWeeklyReport();
   }
 
   stop() {
     if (this.scanInterval) clearInterval(this.scanInterval);
     if (this.resolveInterval) clearInterval(this.resolveInterval);
+    if (this.weeklyCheckInterval) clearInterval(this.weeklyCheckInterval);
     this.isRunning = false;
     log('info', 'Weather Bot stopped');
   }
