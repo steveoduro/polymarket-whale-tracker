@@ -1623,6 +1623,9 @@ class WeatherBot {
 
         await this.supabase.from('no_opportunities').update({
           status: won ? 'won' : 'lost', pnl,
+          exit_reason: 'resolution',
+          exit_time: new Date().toISOString(),
+          exit_price: won ? 1.0 : 0.0,
         }).eq('id', position.id);
 
         log('info', 'NO trade resolved', {
