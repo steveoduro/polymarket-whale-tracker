@@ -255,7 +255,9 @@ function formatTradeAlert(opportunity, positions) {
 function formatResolutionAlert(result, stats) {
   const { trade, actualTemp, winningRange, won, pnl } = result;
 
-  let msg = `📊 *[Bot A] TRADE RESOLVED*\n\n`;
+  const platform = trade.platform || 'polymarket';
+  const ptag = platform === 'kalshi' ? '[KL] ' : '[PM] ';
+  let msg = `📊 *[Bot A] ${ptag}TRADE RESOLVED*\n\n`;
   msg += `📍 ${trade.city.toUpperCase()} - ${trade.target_date}\n`;
   msg += `🌡️ Actual High: ${actualTemp}°\n\n`;
   msg += `Result: ${won ? '✅ WON' : '❌ LOST'} (${winningRange || 'unknown'})\n`;
@@ -460,8 +462,8 @@ class WeatherBot {
           continue;
         }
 
-        // Get forecast from all available sources
-        const forecast = await this.weatherApi.getMultiSourceForecast(market.city, market.dateStr);
+        // Get forecast from all available sources (platform-aware: Kalshi forces NWS)
+        const forecast = await this.weatherApi.getMultiSourceForecast(market.city, market.dateStr, market.platform);
         if (!forecast) continue;
 
         // Log multi-source data (first market per cycle only to reduce noise)
@@ -1312,7 +1314,7 @@ class WeatherBot {
     for (const market of validMarkets) {
       if (!market.hasLiquidity) continue;
 
-      const forecast = await this.weatherApi.getMultiSourceForecast(market.city, market.dateStr);
+      const forecast = await this.weatherApi.getMultiSourceForecast(market.city, market.dateStr, market.platform);
       if (!forecast) continue;
 
       const forecastC = (forecast.highF - 32) * 5 / 9;
@@ -1424,8 +1426,9 @@ class WeatherBot {
         });
 
         if (CONFIG.TELEGRAM_ON_TRADE) {
+          const noPtag = (market.platform || 'polymarket') === 'kalshi' ? '[KL] ' : '[PM] ';
           await sendTelegram(
-            `🔻 *[Bot A] NO TRADE*: ${market.city.toUpperCase()} ${range.name}\n` +
+            `🔻 *[Bot A] ${noPtag}NO TRADE*: ${market.city.toUpperCase()} ${range.name}\n` +
             `Date: ${market.dateStr}\n` +
             `Distance: ${distance.toFixed(1)}°C from forecast (${forecastC.toFixed(1)}°C)\n` +
             `Entry: ${(noAsk * 100).toFixed(0)}¢ NO (${(yesBid * 100).toFixed(0)}¢ YES bid)\n` +
@@ -1489,8 +1492,9 @@ class WeatherBot {
             pnl: '$' + pnl.toFixed(2),
           });
 
+          const noTPtag = (position.platform || 'polymarket') === 'kalshi' ? '[KL] ' : '[PM] ';
           await sendTelegram(
-            `🎯 *[Bot B] NO TAKE PROFIT*: ${position.city} ${position.range_name}\n` +
+            `🎯 *[Bot A] ${noTPtag}NO TAKE PROFIT*: ${position.city} ${position.range_name}\n` +
             `Date: ${position.target_date}\n` +
             `Entry: ${(entryPrice * 100).toFixed(0)}¢ → Exit: ${(noBid * 100).toFixed(0)}¢\n` +
             `P&L: $${pnl.toFixed(2)}`
@@ -1505,7 +1509,7 @@ class WeatherBot {
 
         if (daysToResolution >= CONFIG.NO_TRADING.FORECAST_EXIT_MIN_DAYS &&
             noBid >= CONFIG.NO_TRADING.FORECAST_EXIT_MIN_NO_BID) {
-          const forecast = await this.weatherApi.getMultiSourceForecast(position.city, targetDate);
+          const forecast = await this.weatherApi.getMultiSourceForecast(position.city, targetDate, position.platform);
           if (forecast) {
             const forecastC = (forecast.highF - 32) * 5 / 9;
             const rangeInfo = this.parseRangeForNo(position.range_name);
@@ -1570,8 +1574,9 @@ class WeatherBot {
                       pnl: '$' + pnl.toFixed(2),
                     });
 
+                    const noFEtag = (position.platform || 'polymarket') === 'kalshi' ? '[KL] ' : '[PM] ';
                     await sendTelegram(
-                      `⚠️ *[Bot A] NO FORECAST EXIT (confirmed)*: ${position.city} ${position.range_name}\n` +
+                      `⚠️ *[Bot A] ${noFEtag}NO FORECAST EXIT (confirmed)*: ${position.city} ${position.range_name}\n` +
                       `Date: ${position.target_date}\n` +
                       `Distance dropped to ${distance.toFixed(1)}°C (was ${parseFloat(position.distance_from_range_c).toFixed(1)}°C)\n` +
                       `Entry: ${(entryPrice * 100).toFixed(0)}¢ → Exit: ${(noBid * 100).toFixed(0)}¢\n` +
@@ -1676,8 +1681,9 @@ class WeatherBot {
         });
 
         if (CONFIG.TELEGRAM_ON_TRADE) {
+          const noRtag = (position.platform || 'polymarket') === 'kalshi' ? '[KL] ' : '[PM] ';
           await sendTelegram(
-            `📊 *[Bot A] NO TRADE RESOLVED*: ${position.city} ${position.range_name}\n` +
+            `📊 *[Bot A] ${noRtag}NO TRADE RESOLVED*: ${position.city} ${position.range_name}\n` +
             `Date: ${position.target_date}\n` +
             `Actual: ${tempF}°F (${tempC.toFixed(1)}°C)\n` +
             `Range ${landedInRange ? 'HIT → NO ❌ LOST' : 'MISSED → NO ✅ WON'}\n` +
@@ -1879,7 +1885,7 @@ async function scanOnly() {
     if (!CONFIG.ACTIVE_CITIES.includes(market.city)) continue;
     if (market.date <= today) continue;
 
-    const forecast = await weatherApi.getMultiSourceForecast(market.city, market.dateStr);
+    const forecast = await weatherApi.getMultiSourceForecast(market.city, market.dateStr, market.platform);
     if (!forecast) continue;
 
     // Save forecast to history
