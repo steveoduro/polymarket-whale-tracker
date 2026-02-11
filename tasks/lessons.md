@@ -143,6 +143,61 @@
 - Scripts in `/tmp/` need `require('dotenv').config({ path: '/home/deployer/polymarket-whale-tracker/.env' })` — plain `require('dotenv').config()` looks in `/tmp/` for `.env`
 - Also need `NODE_PATH=/home/deployer/polymarket-whale-tracker/node_modules` when running with `node`
 
+## Kelly Criterion (Corrected)
+- The simplified Kelly `(p*payout - q) / payout` is WRONG for prediction markets — it ignores purchase price
+- Correct formula: `b = (payout - ask) / ask` (net odds), then `kelly = (b*p - q) / b`
+- At expensive asks (>50¢), the simplified formula overestimates by 3-5x. At cheap asks (<20¢), the difference is small
+- Example: prob=0.80, ask=0.75, payout=0.9685 → old=59.4%, correct=11.4% (5.2x overestimate)
+- Always use half-Kelly (`KELLY_FRACTION=0.5`) on top of the correct formula for additional safety
+
+## PnL & Fee Calculations (Corrected Again)
+- **Polymarket weather**: ZERO trading fees (the 3.15% only applies to 15-min crypto markets)
+- **Kalshi**: Per-contract fee = `0.07 × price × (1-price)`, charged on ENTRY only when held to settlement
+  - Early exit (before settlement): fee charged on BOTH entry and exit trades
+  - Settlement: no additional fee (free)
+  - Max fee: 1.75¢/contract at 50¢ price
+- Never assume fee models are the same across platforms — research each platform's actual fee structure
+- Win PnL (Kalshi): `revenue - cost - entryFee`; Loss PnL: `-cost - entryFee`
+- Win PnL (Polymarket): `revenue - cost`; Loss PnL: `-cost`
+
+## Forecast Std Dev Calibration
+- Default std devs were 2-3x too small (1°F day-1 vs empirical 2.5-3.5°F)
+- Correct base values (day-1): very-high=2.5°F, high=3.0°F, medium=4.0°F, low=5.0°F
+- Time scaling: use `sqrt(daysOut)` not `hours/48` — base values are day-1 accuracy, grows with sqrt for longer leads
+- Impact: massively reduces number of trades passing edge threshold — this is correct, bot was overtrading
+- After changing std devs, audit existing open trades and invalidate those that wouldn't pass new filters
+
+## Continuity Correction (Integer Temperature Resolution)
+- Both platforms resolve to whole-degree integers (NWS CLI for Kalshi, Weather Underground for Polymarket)
+- Polymarket explicitly states: "measures temperatures to whole degrees Fahrenheit/Celsius"
+- A range "34-35°F" means the integer is 34 or 35 → continuous range [33.5, 35.5]
+- Without correction, a 2°F range only covers 1°F in the CDF → ~50% underestimate of probability
+- Apply ±0.5 to ALL parsed range boundaries for both platforms
+- For Kalshi: "above X" → min=X+0.5, "below X" → max=X-0.5, "between X and Y" → [X-0.5, Y+0.5]
+- For Polymarket °C single values (e.g., "6°C"): already had ±0.5 — no change needed
+- Resolver outcome checks still work correctly with ±0.5 bounds since actual temps are always integers
+
+## HTTP Reliability
+- ALL external HTTP calls need timeouts — one hung request can stall an entire scan cycle (7+ min observed)
+- Use `AbortSignal.timeout(15000)` (Node 20+) — cleaner than manual AbortController
+- Telegram API gets shorter timeout (10s) since it's non-critical
+- Wrap each major cycle step in independent try/catch — scanner crash shouldn't prevent resolver from running
+
+## Caching & Performance
+- Kalshi API returns all markets for a series in one call — cache at series level (4-min TTL), not per city/date
+- This reduced API calls from ~368/cycle to ~23/cycle, saving ~60s per cycle
+- In-memory cache clears on PM2 restart — first cycle after restart is slower, that's expected
+- Cursor-based pagination needed for Kalshi (200 per page limit) — without it, markets beyond page 1 are silently dropped
+
+## Bankroll Management
+- In-memory bankroll tracking drifts over time as trades resolve/exit and free capital
+- Fix: call `initBankrolls()` (queries DB for open trade costs) at the start of every cycle
+- Without this, bot progressively deploys less capital as bankroll variable never recovers
+
+## Telegram Alerts
+- Never use `parse_mode: 'HTML'` with dynamic content — unescaped `<`, `>`, `&` characters cause silent send failures
+- Plain text is more reliable; only use HTML/Markdown parse_mode with fully controlled template strings
+
 ---
 
 *Add new lessons as discovered from paper trading and live trading.*

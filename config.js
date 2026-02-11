@@ -28,7 +28,7 @@ const config = {
     MAX_BANKROLL_PCT: 0.20,             // hard cap per position as % of bankroll
     MIN_BET: 10,
     MAX_VOLUME_PCT: null,               // null = no cap (paper mode), set to 25-50 for live
-    HARD_REJECT_VOLUME_PCT: 100,        // hard-reject trades > 100% of visible volume
+    HARD_REJECT_VOLUME_PCT: 75,         // hard-reject trades > 75% of visible volume
     WARN_VOLUME_PCT: 50,                // flag trades > 50% of volume in alerts
   },
 
@@ -40,11 +40,11 @@ const config = {
   // ── Forecasts ────────────────────────────────────────────────────
   forecasts: {
     CACHE_MINUTES: 15,
-    DEFAULT_STD_DEVS: {                 // in °C
-      'very-high': 0.56,               // ±1°F
-      'high': 1.11,                     // ±2°F
-      'medium': 1.67,                   // ±3°F
-      'low': 2.22,                      // ±4°F
+    DEFAULT_STD_DEVS: {                 // in °C — base values for day-1 forecasts (empirical NWS/ECMWF verification)
+      'very-high': 1.39,               // ~2.5°F — sources agree within 1°F
+      'high': 1.67,                     // ~3.0°F — sources agree within 2°F
+      'medium': 2.22,                   // ~4.0°F — sources agree within 4°F
+      'low': 2.78,                      // ~5.0°F — large disagreement or single source
     },
   },
 
@@ -64,13 +64,14 @@ const config = {
   platforms: {
     polymarket: {
       enabled: true,
-      feeRate: 0.0315,
+      feeRate: 0,                             // Weather markets: zero trading fees (3.15% only applies to 15-min crypto)
       gammaUrl: 'https://gamma-api.polymarket.com',
       clobUrl: 'https://clob.polymarket.com',
     },
     kalshi: {
       enabled: true,
-      feeRate: 0.012,
+      feeRate: 0,                             // Legacy flat rate (unused) — see takerFeeMultiplier
+      takerFeeMultiplier: 0.07,               // Actual fee: 0.07 * P * (1-P) per contract, charged at entry only
       apiUrl: 'https://api.elections.kalshi.com/trade-api/v2',
       apiKey: process.env.KALSHI_API_KEY,
       privateKeyPath: process.env.KALSHI_PRIVATE_KEY_PATH,
