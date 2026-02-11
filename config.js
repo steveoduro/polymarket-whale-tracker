@@ -16,6 +16,7 @@ const config = {
   entry: {
     MIN_EDGE_PCT: 10,                   // minimum edge % to enter
     MAX_SPREAD: 0.15,                   // hard spread cap in dollars
+    MIN_ASK_PRICE: 0.03,               // skip markets priced below 3¢ (dead/no liquidity)
   },
 
   // ── Position Sizing ──────────────────────────────────────────────
@@ -26,6 +27,9 @@ const config = {
     NO_MAX_PER_DATE: 200,               // hard cap on NO exposure per resolution date
     MAX_BANKROLL_PCT: 0.20,             // hard cap per position as % of bankroll
     MIN_BET: 10,
+    MAX_VOLUME_PCT: null,               // null = no cap (paper mode), set to 25-50 for live
+    HARD_REJECT_VOLUME_PCT: 200,        // hard-reject trades > 200% of visible volume
+    WARN_VOLUME_PCT: 50,                // flag trades > 50% of volume in alerts
   },
 
   // ── Exit ─────────────────────────────────────────────────────────
