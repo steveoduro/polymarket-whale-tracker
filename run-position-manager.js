@@ -56,6 +56,11 @@ const CONFIG = {
   // Platform
   POLYMARKET_FEE: 0.0315,
 
+  // Early Actuals (METAR) — same-day position intelligence
+  EARLY_ACTUALS_ENABLED: true,
+  EARLY_ACTUALS_LOG_ONLY: true,   // Set false after validating METAR data
+  EARLY_ACTUAL_MIN_BID: 0.03,     // Min 3¢ bid to bother exiting
+
   // Telegram alerts
   TELEGRAM_ON_EXIT: true,
   TELEGRAM_ON_REENTRY: true,
@@ -121,6 +126,7 @@ async function main() {
   console.log(`  Error margin: ${CONFIG.FORECAST_EXIT_MIN_MARGIN_MULTIPLIER}x source avg error (default ${CONFIG.FORECAST_EXIT_DEFAULT_ERROR_F}°F)`);
   console.log(`  Stability: ${CONFIG.FORECAST_EXIT_CONFIRM_CHECKS} consecutive checks required`);
   console.log('Re-entry: ENABLED');
+  console.log(`Early Actuals: ${CONFIG.EARLY_ACTUALS_ENABLED ? 'ENABLED' : 'DISABLED'} (log-only: ${CONFIG.EARLY_ACTUALS_LOG_ONLY})`);
   console.log('Scan interval: 10 minutes\n');
 
   // Initialize dependencies
