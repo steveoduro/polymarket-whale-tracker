@@ -127,14 +127,6 @@ class Bot {
         backfilled: resolverResult.opportunitiesBackfilled,
       });
 
-      this.alerts.cycleSummary({
-        marketsScanned: scanResult.marketsScanned,
-        opportunitiesLogged: scanResult.logged,
-        entered: trades.length,
-        openPositions: monitorResult.evaluated,
-        exits: monitorResult.exits,
-      });
-
     } catch (err) {
       this._log('error', `Cycle #${this.cycleCount} FAILED`, { error: err.message, stack: err.stack });
       this.alerts.error(`Cycle #${this.cycleCount}`, err);
