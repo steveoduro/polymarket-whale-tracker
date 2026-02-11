@@ -1085,7 +1085,7 @@ class WeatherBot {
             strategy: opp.strategy,
             edgePct: opp.edgePct?.toFixed(2),
             trueProbability: opp.trueProbability?.toFixed(4),
-            marketPrice: opp.marketPrice?.toFixed(4),
+            marketPrice: opp.marketProbability?.toFixed(4),
             kellyReason: positions.kelly?.reason || 'Kelly bet <= 0',
             kellyBet: positions.kelly?.kellyBet?.toFixed(2),
             fullKelly: positions.kelly?.fullKelly?.toFixed(4),
@@ -1184,7 +1184,7 @@ class WeatherBot {
         mispricing_pct: opp.mispricingPct,
         recommended_range: opp.bestRange?.name,
         recommended_price: marketPrice,
-        expected_value: opp.expectedValue?.ev,
+        expected_value: opp.expectedValue?.evPerDollar,
         fee_adjusted_ev: opp.expectedValue?.evPct,
         // Filter tracking fields
         edge_at_entry: edgePct,
@@ -1469,7 +1469,7 @@ class WeatherBot {
     log('info', 'Weekly platform report sent to Telegram');
   }
 
-  start() {
+  async start() {
     if (this.isRunning) {
       log('warn', 'Bot already running');
       return;
@@ -1482,8 +1482,8 @@ class WeatherBot {
     });
 
     // Initial runs
-    this.runScanCycle();
-    this.runResolutionCycle();
+    await this.runScanCycle();
+    await this.runResolutionCycle();
 
     // Set up intervals
     this.scanInterval = setInterval(() => this.runScanCycle(), CONFIG.SCAN_INTERVAL_MS);
@@ -1542,7 +1542,7 @@ class WeatherBot {
         if (isNaN(n)) return null;
         return { centerC: n, lowC: n - 30, highC: n, type: 'open_low' };
       }
-      const rangeMatch = cleaned.match(/(-?[\d.]+)\s*[-–]\s*(-?[\d.]+)/);
+      const rangeMatch = cleaned.match(/(-?[\d.]+)\s*(?:[-–]|to)\s*(-?[\d.]+)/);
       if (rangeMatch) {
         const low = parseFloat(rangeMatch[1]), high = parseFloat(rangeMatch[2]);
         return { centerC: (low + high) / 2, lowC: low, highC: high, type: 'range' };
@@ -1568,7 +1568,7 @@ class WeatherBot {
       const c = toC(n);
       return { centerC: c, lowC: c - 30, highC: c, type: 'open_low' };
     }
-    const rangeMatch = cleaned.match(/(-?[\d.]+)\s*[-–]\s*(-?[\d.]+)/);
+    const rangeMatch = cleaned.match(/(-?[\d.]+)\s*(?:[-–]|to)\s*(-?[\d.]+)/);
     if (rangeMatch) {
       const lowC = toC(parseFloat(rangeMatch[1])), highC = toC(parseFloat(rangeMatch[2]));
       return { centerC: (lowC + highC) / 2, lowC, highC, type: 'range' };
@@ -1998,7 +1998,7 @@ class WeatherBot {
             const threshold = parseFloat(cleaned.match(/-?[\d.]+/)?.[0]);
             landedInRange = !isNaN(threshold) && tempC <= threshold;
           } else {
-            const rm = cleaned.match(/(-?[\d.]+)\s*[-–]\s*(-?[\d.]+)/);
+            const rm = cleaned.match(/(-?[\d.]+)\s*(?:[-–]|to)\s*(-?[\d.]+)/);
             if (rm) landedInRange = tempC >= parseFloat(rm[1]) && tempC <= parseFloat(rm[2]);
             else {
               const s = cleaned.match(/(-?[\d.]+)\s*°C/);
@@ -2013,7 +2013,7 @@ class WeatherBot {
             const threshold = parseFloat(cleaned.match(/-?[\d.]+/)?.[0]);
             landedInRange = !isNaN(threshold) && tempF <= threshold;
           } else {
-            const rm = cleaned.match(/(-?[\d.]+)\s*[-–]\s*(-?[\d.]+)/);
+            const rm = cleaned.match(/(-?[\d.]+)\s*(?:[-–]|to)\s*(-?[\d.]+)/);
             if (rm) landedInRange = tempF >= parseFloat(rm[1]) && tempF <= parseFloat(rm[2]);
             else {
               const s = cleaned.match(/(-?[\d.]+)\s*°/);
@@ -2317,13 +2317,12 @@ async function scanOnly() {
   console.log('PRECIPITATION MARKETS');
   console.log('='.repeat(50));
 
+  let precipCount = 0;
   if (!CONFIG.ENABLE_PRECIPITATION) {
     console.log('\nPrecipitation trading DISABLED (capital efficiency - locks funds for full month)');
   } else {
     const precipMarkets = await scanner.getActivePrecipitationMarkets();
     console.log(`Found ${precipMarkets.length} precipitation markets\n`);
-
-    let precipCount = 0;
 
     for (const market of precipMarkets) {
       // Check liquidity first
