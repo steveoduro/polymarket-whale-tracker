@@ -127,6 +127,33 @@ const PLATFORM_CONFIG = {
   }
 };
 
+// Range-type entry restrictions (bounded = "74° to 75°", unbounded = "42°F or higher")
+// Analysis: bounded 30-35¢ = 0% win rate (-$235), unbounded 36¢+ = 90% win rate (+$206)
+const BOUNDED_ENTRY = {
+  MAX_PRICE: 0.30,           // Block bounded entries above 30¢ (0% win rate zone)
+  MIN_EDGE_PCT: 5,           // 5% edge (up from 3%)
+  MIN_CONFIDENCE: 'high',    // High+ confidence required
+  KELLY_FRACTION: 0.50,      // Half Kelly (conservative)
+  MAX_POSITION_PCT: 0.20,    // 20% max position
+  MIN_DAYS_BEFORE: null,     // Use platform default (Polymarket: 2, Kalshi: 0)
+};
+
+const UNBOUNDED_ENTRY = {
+  MAX_PRICE: 0.85,           // Keep existing max
+  MIN_EDGE_PCT: null,        // Use platform default (3%/4%)
+  MIN_CONFIDENCE: null,      // Use platform default
+  KELLY_FRACTION: 0.65,      // 65% Kelly (lean into winners)
+  MAX_POSITION_PCT: 0.25,    // 25% max position
+  MIN_DAYS_BEFORE: 1,        // Allow 1-day-out entries (Polymarket default is 2)
+};
+
+function isUnboundedRange(opp) {
+  const range = opp.bestRange;
+  if (!range) return false;
+  return (range.max === Infinity || range.max >= 200) ||
+         (range.min === -Infinity || range.min <= -200);
+}
+
 // =============================================================================
 // LOGGING
 // =============================================================================
@@ -814,6 +841,97 @@ class WeatherBot {
           }
         }
 
+        // === RANGE TYPE FILTER ===
+        const unbounded = isUnboundedRange(opp);
+        const rangeTypeConfig = unbounded ? UNBOUNDED_ENTRY : BOUNDED_ENTRY;
+        const rangeTypeLabel = unbounded ? 'unbounded' : 'bounded';
+
+        // Price cap (bounded: 30¢, unbounded: 85¢)
+        const rangeEntryPrice = opp.bestRange?.price || opp.marketProbability || 0;
+        if (rangeEntryPrice > rangeTypeConfig.MAX_PRICE) {
+          log('info', `Range type price cap exceeded (${rangeTypeLabel}) - skipping`, {
+            city: opp.market.city,
+            date: opp.market.dateStr,
+            platform,
+            rangeType: rangeTypeLabel,
+            price: (rangeEntryPrice * 100).toFixed(0) + '¢',
+            maxPrice: (rangeTypeConfig.MAX_PRICE * 100).toFixed(0) + '¢',
+          });
+
+          try {
+            await this.logFilteredOpportunity(opp, {
+              netEdgeDollars: null,
+              grossEdgeDollars: null,
+              feeCost: null,
+              filterReason: 'bounded_price_cap',
+              threshold: rangeTypeConfig.MAX_PRICE,
+            });
+          } catch (err) {
+            log('warn', 'Failed to log filtered opportunity', { error: err.message });
+          }
+
+          continue;
+        }
+
+        // Edge % override for bounded ranges (5% min vs platform default)
+        if (rangeTypeConfig.MIN_EDGE_PCT && tradeEdge < rangeTypeConfig.MIN_EDGE_PCT) {
+          log('info', `Range type edge below threshold (${rangeTypeLabel}) - skipping`, {
+            city: opp.market.city,
+            date: opp.market.dateStr,
+            platform,
+            rangeType: rangeTypeLabel,
+            tradeEdge: tradeEdge.toFixed(1) + '%',
+            minRequired: rangeTypeConfig.MIN_EDGE_PCT + '%',
+          });
+
+          try {
+            await this.logFilteredOpportunity(opp, {
+              netEdgeDollars: null,
+              grossEdgeDollars: null,
+              feeCost: null,
+              filterReason: 'bounded_edge_below_threshold',
+              threshold: rangeTypeConfig.MIN_EDGE_PCT,
+            });
+          } catch (err) {
+            log('warn', 'Failed to log filtered opportunity', { error: err.message });
+          }
+
+          continue;
+        }
+
+        // Confidence override for bounded ranges (requires 'high'+)
+        if (rangeTypeConfig.MIN_CONFIDENCE) {
+          const levels = ['low', 'medium', 'high', 'very-high'];
+          const requiredIdx = levels.indexOf(rangeTypeConfig.MIN_CONFIDENCE);
+          const actualConfidence = opp.confidence || 'low';
+          const actualIdx = levels.indexOf(actualConfidence);
+
+          if (actualIdx < requiredIdx) {
+            log('info', `Range type confidence below threshold (${rangeTypeLabel}) - skipping`, {
+              city: opp.market.city,
+              date: opp.market.dateStr,
+              platform,
+              rangeType: rangeTypeLabel,
+              confidence: actualConfidence,
+              required: rangeTypeConfig.MIN_CONFIDENCE,
+            });
+
+            try {
+              await this.logFilteredOpportunity(opp, {
+                netEdgeDollars: null,
+                grossEdgeDollars: null,
+                feeCost: null,
+                filterReason: 'bounded_confidence_below_threshold',
+                threshold: rangeTypeConfig.MIN_CONFIDENCE,
+              });
+            } catch (err) {
+              log('warn', 'Failed to log filtered opportunity', { error: err.message });
+            }
+
+            continue;
+          }
+        }
+
         // Check minimum dollar edge per share (after fees)
         const marketPrice = opp.marketProbability || opp.bestRange?.price || 0;
         const trueProbability = opp.trueProbability || 0;
@@ -860,13 +978,17 @@ class WeatherBot {
         const now = new Date();
         const daysBeforeResolution = Math.ceil((targetDate - now) / (1000 * 60 * 60 * 24));
 
-        if (daysBeforeResolution < platConfig.MIN_DAYS_BEFORE_RESOLUTION) {
+        // Unbounded ranges can enter closer to resolution (1 day vs platform default)
+        const effectiveMinDays = rangeTypeConfig.MIN_DAYS_BEFORE ?? platConfig.MIN_DAYS_BEFORE_RESOLUTION;
+
+        if (daysBeforeResolution < effectiveMinDays) {
           log('info', 'Too close to resolution for platform - skipping', {
             city: opp.market.city,
             date: opp.market.dateStr,
             platform,
+            rangeType: rangeTypeLabel,
             daysBeforeResolution,
-            minRequired: platConfig.MIN_DAYS_BEFORE_RESOLUTION,
+            minRequired: effectiveMinDays,
           });
 
           try {
@@ -877,7 +999,7 @@ class WeatherBot {
               filterReason: 'too_close_to_resolution',
               entryPrice,
               daysBeforeResolution,
-              threshold: platConfig.MIN_DAYS_BEFORE_RESOLUTION,
+              threshold: effectiveMinDays,
             });
           } catch (err) {
             log('warn', 'Failed to log filtered opportunity', { error: err.message });
@@ -940,8 +1062,10 @@ class WeatherBot {
         }
 
         // Calculate position size for this opportunity (use current bankroll including P&L)
+        // Range-type overrides: bounded=50%Kelly/20%max, unbounded=65%Kelly/25%max
         const positions = this.detector.generatePositions(opp, currentBankroll, {
-          maxPositionPct: CONFIG.MAX_POSITION_PCT,
+          maxPositionPct: rangeTypeConfig.MAX_POSITION_PCT || CONFIG.MAX_POSITION_PCT,
+          kellyFraction: rangeTypeConfig.KELLY_FRACTION || CONFIG.KELLY_FRACTION,
         });
 
         if (positions.positions.length === 0) {
@@ -972,6 +1096,9 @@ class WeatherBot {
           });
           continue;
         }
+
+        // Attach range-type config for executeOpportunity's Kelly sizing
+        opp._rangeTypeConfig = rangeTypeConfig;
 
         // Execute the trade
         const result = await this.executeOpportunity(opp);
@@ -1114,9 +1241,11 @@ class WeatherBot {
         marketSlug: opportunity.market.slug,
       };
     } else {
-      // Normal Kelly sizing
+      // Normal Kelly sizing with range-type overrides
+      const rtConfig = opportunity._rangeTypeConfig || {};
       positions = this.detector.generatePositions(opportunity, capital, {
-        maxPositionPct: CONFIG.MAX_POSITION_PCT,
+        maxPositionPct: rtConfig.MAX_POSITION_PCT || CONFIG.MAX_POSITION_PCT,
+        kellyFraction: rtConfig.KELLY_FRACTION || CONFIG.KELLY_FRACTION,
         maxPerRange: CONFIG.MAX_PER_RANGE_PCT,
         hedgeRanges: CONFIG.HEDGE_RANGES,
       });

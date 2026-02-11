@@ -15,6 +15,7 @@
 require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 const { WeatherAPI } = require('./lib/weather-api');
+const { KalshiAPI } = require('./lib/kalshi-api');
 const { PositionManager } = require('./lib/position-manager');
 
 // =============================================================================
@@ -130,6 +131,15 @@ async function main() {
 
   const weatherApi = new WeatherAPI({ log });
 
+  // Initialize Kalshi API for position monitoring (read-only, no auth needed)
+  let kalshiApi = null;
+  try {
+    kalshiApi = new KalshiAPI({ demo: process.env.KALSHI_DEMO === 'true', log });
+    log('success', 'Kalshi API initialized for position monitoring');
+  } catch (err) {
+    log('warn', 'Kalshi API init failed - Kalshi positions will be skipped', { error: err.message });
+  }
+
   // Test DB connection
   const { error: dbError } = await supabase
     .from('weather_paper_trades')
@@ -179,6 +189,7 @@ async function main() {
   const manager = new PositionManager({
     supabase,
     weatherApi,
+    kalshiApi,
     log,
     sendTelegram,
     settings: CONFIG,
