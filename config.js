@@ -35,14 +35,11 @@ const config = {
   // ── Exit ─────────────────────────────────────────────────────────
   exit: {
     EVALUATOR_MODE: 'log_only',         // 'log_only' | 'active'
-    METAR_MODE: 'log_only',             // 'log_only' | 'active'
   },
 
   // ── Forecasts ────────────────────────────────────────────────────
   forecasts: {
-    SOURCES: ['nws', 'openmeteo', 'weatherapi'],
     CACHE_MINUTES: 15,
-    ENSEMBLE_MODE: 'equal',             // 'equal' | 'weighted'
     DEFAULT_STD_DEVS: {                 // in °C
       'very-high': 0.56,               // ±1°F
       'high': 1.11,                     // ±2°F
@@ -115,10 +112,6 @@ const config = {
     serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
   },
 
-  // ── Security ─────────────────────────────────────────────────────
-  security: {
-    LIVE_TRADE_CONFIRMATION: true,
-  },
 };
 
 module.exports = config;

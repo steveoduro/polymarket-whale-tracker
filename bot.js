@@ -89,48 +89,74 @@ class Bot {
     const cycleStart = Date.now();
     this._log('info', `──── Cycle #${this.cycleCount} starting ────`);
 
-    try {
-      // 1. Scanner: evaluate all markets, log opportunities
-      const scanResult = await this.scanner.scan();
+    // Refresh bankrolls from DB each cycle (resolved/exited trades free capital)
+    await this.executor.initBankrolls();
 
-      // 2. Executor: size and record trades for approved entries
-      let trades = [];
+    // Each step has its own try/catch — failures are independent
+    let scanResult = { opportunities: [], logged: 0, filtered: 0, marketsScanned: 0 };
+    let trades = [];
+    let monitorResult = { evaluated: 0, exits: 0 };
+    let resolverResult = { tradesResolved: 0, opportunitiesBackfilled: 0 };
+
+    // 1. Scanner: evaluate all markets, log opportunities
+    try {
+      scanResult = await this.scanner.scan();
+    } catch (err) {
+      this._log('error', `Scanner failed in cycle #${this.cycleCount}`, { error: err.message });
+      this.alerts.error(`Scanner cycle #${this.cycleCount}`, err);
+    }
+
+    // 2. Executor: size and record trades for approved entries
+    try {
       if (scanResult.opportunities.length > 0) {
         trades = await this.executor.execute(scanResult.opportunities);
       }
+    } catch (err) {
+      this._log('error', `Executor failed in cycle #${this.cycleCount}`, { error: err.message });
+      this.alerts.error(`Executor cycle #${this.cycleCount}`, err);
+    }
 
-      // 3. Monitor: re-evaluate all open positions
-      const monitorResult = await this.monitor.evaluate();
+    // 3. Monitor: re-evaluate all open positions
+    try {
+      monitorResult = await this.monitor.evaluate();
+    } catch (err) {
+      this._log('error', `Monitor failed in cycle #${this.cycleCount}`, { error: err.message });
+      this.alerts.error(`Monitor cycle #${this.cycleCount}`, err);
+    }
 
-      // 4. Resolver: resolve trades, backfill opportunities, record accuracy
-      const resolverResult = await this.resolver.resolve();
+    // 4. Resolver: resolve trades, backfill opportunities, record accuracy
+    try {
+      resolverResult = await this.resolver.resolve();
+    } catch (err) {
+      this._log('error', `Resolver failed in cycle #${this.cycleCount}`, { error: err.message });
+      this.alerts.error(`Resolver cycle #${this.cycleCount}`, err);
+    }
 
-      // 5. Snapshots (every SNAPSHOT_INTERVAL_MINUTES)
+    // 5. Snapshots (every SNAPSHOT_INTERVAL_MINUTES)
+    try {
       const snapshotIntervalMs = config.snapshots.INTERVAL_MINUTES * 60 * 1000;
       if (Date.now() - this.lastSnapshotAt >= snapshotIntervalMs) {
         const snapshotCount = await this.scanner.captureSnapshots();
         this.lastSnapshotAt = Date.now();
         this._log('info', `Snapshots captured: ${snapshotCount}`);
       }
-
-      // 6. Cycle summary
-      const elapsed = ((Date.now() - cycleStart) / 1000).toFixed(1);
-      this._log('info', `Cycle #${this.cycleCount} complete in ${elapsed}s`, {
-        marketsScanned: scanResult.marketsScanned,
-        logged: scanResult.logged,
-        approved: scanResult.opportunities.length,
-        filtered: scanResult.filtered,
-        tradesEntered: trades.length,
-        monitored: monitorResult.evaluated,
-        exits: monitorResult.exits,
-        resolved: resolverResult.tradesResolved,
-        backfilled: resolverResult.opportunitiesBackfilled,
-      });
-
     } catch (err) {
-      this._log('error', `Cycle #${this.cycleCount} FAILED`, { error: err.message, stack: err.stack });
-      this.alerts.error(`Cycle #${this.cycleCount}`, err);
+      this._log('error', `Snapshots failed in cycle #${this.cycleCount}`, { error: err.message });
     }
+
+    // 6. Cycle summary
+    const elapsed = ((Date.now() - cycleStart) / 1000).toFixed(1);
+    this._log('info', `Cycle #${this.cycleCount} complete in ${elapsed}s`, {
+      marketsScanned: scanResult.marketsScanned,
+      logged: scanResult.logged,
+      approved: scanResult.opportunities.length,
+      filtered: scanResult.filtered,
+      tradesEntered: trades.length,
+      monitored: monitorResult.evaluated,
+      exits: monitorResult.exits,
+      resolved: resolverResult.tradesResolved,
+      backfilled: resolverResult.opportunitiesBackfilled,
+    });
 
     // 7. Flush alert queue
     try {
@@ -166,7 +192,7 @@ process.on('SIGTERM', () => {
 
 process.on('uncaughtException', (err) => {
   console.error(`[FATAL] Uncaught exception: ${err.message}\n${err.stack}`);
-  bot.alerts.sendNow(`🚨 FATAL: ${err.message}`).then(() => process.exit(1));
+  bot.alerts.sendNow(`🚨 FATAL: ${err.message}`).catch(() => {}).finally(() => process.exit(1));
 });
 
 process.on('unhandledRejection', (reason) => {
