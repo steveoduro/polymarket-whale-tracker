@@ -50,7 +50,7 @@ const config = {
 
   // ── Snapshots ────────────────────────────────────────────────────
   snapshots: {
-    INTERVAL_MINUTES: 15,
+    INTERVAL_MINUTES: 60,
   },
 
   // ── Alerts ───────────────────────────────────────────────────────

@@ -149,6 +149,8 @@ class Bot {
     this._log('info', `Cycle #${this.cycleCount} complete in ${elapsed}s`, {
       marketsScanned: scanResult.marketsScanned,
       logged: scanResult.logged,
+      skippedDedup: scanResult.skippedDedup || 0,
+      accumulated: scanResult.accumulated || 0,
       approved: scanResult.opportunities.length,
       filtered: scanResult.filtered,
       tradesEntered: trades.length,
@@ -180,8 +182,10 @@ class Bot {
 
 const bot = new Bot();
 
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
   bot.stop();
+  // Flush any accumulated summaries before exit
+  try { await bot.scanner._flushSummaries(); } catch {}
   process.exit(0);
 });
 
