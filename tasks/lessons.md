@@ -198,6 +198,13 @@
 - Never use `parse_mode: 'HTML'` with dynamic content — unescaped `<`, `>`, `&` characters cause silent send failures
 - Plain text is more reliable; only use HTML/Markdown parse_mode with fully controlled template strings
 
+## Timezone Consistency
+- NEVER use UTC (`new Date().toISOString().split('T')[0]`) to determine "today" for trade operations — always use city-local timezone via `Intl.DateTimeFormat('en-CA', { timeZone: tz })`
+- Scanner uses city-local dates (correct). Resolver/backfill must match.
+- UTC midnight ≠ local midnight. At 00:06 UTC, Toronto is still 19:06 EST yesterday. Resolving based on UTC date creates an enter → resolve → re-enter loop for trades in western timezones
+- Belt-and-suspenders: executor dedup should check both `open` AND `resolved` status to prevent re-entry of just-resolved trades
+- For backfill, use the *earliest* local "today" across all timezones as the safe cutoff (most-ahead timezone = most conservative)
+
 ---
 
 *Add new lessons as discovered from paper trading and live trading.*
