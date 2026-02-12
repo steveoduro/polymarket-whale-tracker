@@ -16,7 +16,7 @@ const config = {
   entry: {
     MIN_EDGE_PCT: 10,                   // minimum edge % to enter
     MAX_SPREAD: 0.15,                   // hard spread cap in dollars
-    MIN_ASK_PRICE: 0.03,               // skip markets priced below 3¢ (dead/no liquidity)
+    MIN_ASK_PRICE: 0.10,               // skip YES trades below 10¢ (ghost markets). NO trades exempt — low NO ask = cheap contrarian bet
   },
 
   // ── Position Sizing ──────────────────────────────────────────────
