@@ -205,6 +205,35 @@
 - Belt-and-suspenders: executor dedup should check both `open` AND `resolved` status to prevent re-entry of just-resolved trades
 - For backfill, use the *earliest* local "today" across all timezones as the safe cutoff (most-ahead timezone = most conservative)
 
+## Dual-Station Cities & Forecast Uncertainty
+- NYC (KNYC vs KLGA) and Chicago (KMDW vs KORD) have 2-6°F station microclimate gaps
+- Forecast engine produces ONE forecast (lat/lon based) but platforms resolve at DIFFERENT stations
+- Conservative fix: bump confidence tier down one level for dual-station cities → wider std dev → fewer false-edge trades
+- Full fix (future): produce separate forecasts per station using station-specific coordinates
+
+## Position Sizing with Fees
+- Kelly formula correctly computes edge including fees, but share count was dividing by `ask` not `effectiveCost`
+- For Kalshi at 50¢: fee = 1.75¢, dividing by ask overallocates ~3.5% (7 extra shares per $100)
+- Fix: `Math.floor(dollars / effectiveCost)` — cost record stays as `shares * ask` (resolver P&L needs contract cost only)
+
+## Weather Underground as Polymarket's Source of Truth
+- Polymarket does NOT resolve from NWS or METAR APIs directly — they use Weather Underground History page
+- WU displays integer temperatures (whole degrees F or C)
+- WU data comes from the same METAR observations we use, but the rounding path (C→F conversion, integer truncation) may differ in edge cases
+- Pre-live requirement: build WU scraper or API integration as canonical resolution source for Polymarket
+- WU pages are JavaScript-rendered — can't scrape with simple HTTP fetch, need headless browser or undocumented API
+- `scripts/wu-audit.js` provides manual spot-check workflow: compare our METAR actuals vs WU displayed values
+
+## Server Timezone Safety
+- `_getHoursToResolution` used `new Date(year, month, day)` which interprets parts in SERVER local timezone
+- Must use `Date.UTC(year, month, day)` so offset calculation works regardless of server timezone
+- Same applies to any `new Date(dateStr + 'T23:00:00')` without 'Z' suffix — server-timezone dependent
+
+## Supabase Unbounded Queries
+- `_recordAccuracy()` was fetching ALL 28k+ opportunities every 5 minutes — no date filter or limit
+- During Supabase platform outage, this hammered the recovering DB
+- Fix: scope to `resolved_at >= 2 days ago` with `.limit(500)` — sufficient for accuracy tracking
+
 ---
 
 *Add new lessons as discovered from paper trading and live trading.*

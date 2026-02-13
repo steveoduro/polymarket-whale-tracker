@@ -20,6 +20,7 @@ const config = {
     MIN_ASK_PRICE: 0.10,               // skip YES trades below 10¢ (ghost markets)
     MIN_NO_ASK_PRICE: 0.05,            // NO-side floor (NO ask 5¢ = YES bid 95¢)
     MIN_HOURS_TO_RESOLUTION: 8,        // don't bet on already-known outcomes
+    MAX_MODEL_MARKET_RATIO: 3.0,       // reject if model prob > 3x market price (temporary guardrail)
   },
 
   // ── Position Sizing ──────────────────────────────────────────────
@@ -43,7 +44,7 @@ const config = {
   // ── Forecasts ────────────────────────────────────────────────────
   forecasts: {
     CACHE_MINUTES: 15,
-    DEFAULT_STD_DEVS: {                 // in °C — base values for day-1 forecasts (empirical NWS/ECMWF verification)
+    DEFAULT_STD_DEVS: {                 // FALLBACK ONLY — used until empirical std devs accumulate (≥10 data points/unit)
       'very-high': 1.39,               // ~2.5°F — sources agree within 1°F
       'high': 1.67,                     // ~3.0°F — sources agree within 2°F
       'medium': 2.22,                   // ~4.0°F — sources agree within 4°F
