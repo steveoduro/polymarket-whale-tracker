@@ -14,6 +14,7 @@ const Scanner = require('./lib/scanner');
 const Executor = require('./lib/executor');
 const Monitor = require('./lib/monitor');
 const Resolver = require('./lib/resolver');
+const METARObserver = require('./lib/metar-observer');
 const Alerts = require('./lib/alerts');
 
 class Bot {
@@ -25,9 +26,11 @@ class Bot {
     this.executor = new Executor(this.adapter, this.alerts);
     this.monitor = new Monitor(this.adapter, this.forecast, this.alerts);
     this.resolver = new Resolver(this.forecast, this.alerts);
+    this.observer = new METARObserver(this.alerts);
 
     this.cycleCount = 0;
     this.lastSnapshotAt = 0;
+    this.lastObserverAt = 0;
     this.running = false;
   }
 
@@ -124,7 +127,21 @@ class Bot {
       this.alerts.error(`Monitor cycle #${this.cycleCount}`, err);
     }
 
-    // 4. Resolver: resolve trades, backfill opportunities, record accuracy
+    // 4. METAR Observer: poll intraday observations for open positions
+    try {
+      const observerIntervalMs = config.observer.POLL_INTERVAL_MINUTES * 60 * 1000;
+      if (Date.now() - this.lastObserverAt >= observerIntervalMs) {
+        const obsResult = await this.observer.observe();
+        this.lastObserverAt = Date.now();
+        if (obsResult.citiesPolled > 0) {
+          this._log('info', `Observer: ${obsResult.citiesPolled} cities polled, ${obsResult.newHighs} new highs`);
+        }
+      }
+    } catch (err) {
+      this._log('error', `Observer failed in cycle #${this.cycleCount}`, { error: err.message });
+    }
+
+    // 5. Resolver: resolve trades, backfill opportunities, record accuracy
     try {
       resolverResult = await this.resolver.resolve();
     } catch (err) {
@@ -132,7 +149,7 @@ class Bot {
       this.alerts.error(`Resolver cycle #${this.cycleCount}`, err);
     }
 
-    // 5. Snapshots (every SNAPSHOT_INTERVAL_MINUTES)
+    // 6. Snapshots (every SNAPSHOT_INTERVAL_MINUTES)
     try {
       const snapshotIntervalMs = config.snapshots.INTERVAL_MINUTES * 60 * 1000;
       if (Date.now() - this.lastSnapshotAt >= snapshotIntervalMs) {
@@ -144,7 +161,7 @@ class Bot {
       this._log('error', `Snapshots failed in cycle #${this.cycleCount}`, { error: err.message });
     }
 
-    // 6. Cycle summary
+    // 7. Cycle summary
     const elapsed = ((Date.now() - cycleStart) / 1000).toFixed(1);
     this._log('info', `Cycle #${this.cycleCount} complete in ${elapsed}s`, {
       marketsScanned: scanResult.marketsScanned,
@@ -160,7 +177,7 @@ class Bot {
       backfilled: resolverResult.opportunitiesBackfilled,
     });
 
-    // 7. Flush alert queue
+    // 8. Flush alert queue
     try {
       const sent = await this.alerts.flush();
       if (sent > 0) this._log('info', `Sent ${sent} Telegram alerts`);
