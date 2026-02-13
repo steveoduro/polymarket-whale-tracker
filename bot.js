@@ -189,8 +189,9 @@ process.on('SIGINT', async () => {
   process.exit(0);
 });
 
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   bot.stop();
+  try { await bot.scanner._flushSummaries(); } catch {}
   process.exit(0);
 });
 
