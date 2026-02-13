@@ -45,6 +45,12 @@ const config = {
   forecasts: {
     CACHE_MINUTES: 15,
     CALIBRATION_WINDOW_DAYS: 21,        // rolling window for bias/std dev calibration (seasonal adaptation)
+    MIN_CITY_STDDEV_SAMPLES: 10,       // minimum samples for per-city std dev (falls back to pooled)
+    LEAD_TIME_BUCKETS: [               // lead-time bias bucketing
+      { name: 'short', min: 0, max: 48 },       // 0-2 days
+      { name: 'medium', min: 49, max: 120 },    // 3-5 days
+      { name: 'long', min: 121, max: Infinity }, // 6+ days
+    ],
     DEFAULT_STD_DEVS: {                 // FALLBACK ONLY — used until empirical std devs accumulate (≥10 data points/unit)
       'very-high': 1.39,               // ~2.5°F — sources agree within 1°F
       'high': 1.67,                     // ~3.0°F — sources agree within 2°F
