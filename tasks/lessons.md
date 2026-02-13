@@ -219,15 +219,19 @@
 ## Weather Underground as Polymarket's Source of Truth
 - Polymarket does NOT resolve from NWS or METAR APIs directly — they use Weather Underground History page
 - WU displays integer temperatures (whole degrees F or C)
-- WU data comes from the same METAR observations we use, but the rounding path (C→F conversion, integer truncation) may differ in edge cases
-- Pre-live requirement: build WU scraper or API integration as canonical resolution source for Polymarket
-- WU pages are JavaScript-rendered — can't scrape with simple HTTP fetch, need headless browser or undocumented API
-- `scripts/wu-audit.js` provides manual spot-check workflow: compare our METAR actuals vs WU displayed values
+- **Weather.com v1 JSON API**: `api.weather.com/v1/location/{STATION}:9:{COUNTRY}/observations/historical.json?apiKey=e1f10a1e78da46f5b10a1e78da96f525&units={e|m}&startDate=YYYYMMDD&endDate=YYYYMMDD`
+- API key `e1f10a1e78da46f5b10a1e78da96f525` is the well-known public key embedded in WU frontend — no auth needed
+- US stations: `max_temp` field in last observation captures sub-hourly peaks (this is what WU displays)
+- International stations: `max_temp` is null — must compute max from hourly `temp` readings
+- Location format: `{ICAO_STATION}:9:{ISO_COUNTRY_CODE}` (e.g., KORD:9:US, EGLC:9:GB, NZWN:9:NZ)
+- WU `max_temp` can differ from METAR computed max by 1°F due to sub-hourly peaks — WU is the correct value for Polymarket resolution
+- Rate limit WU API calls (2.5s between requests) — no documented rate limit but be conservative
 
 ## Server Timezone Safety
 - `_getHoursToResolution` used `new Date(year, month, day)` which interprets parts in SERVER local timezone
 - Must use `Date.UTC(year, month, day)` so offset calculation works regardless of server timezone
 - Same applies to any `new Date(dateStr + 'T23:00:00')` without 'Z' suffix — server-timezone dependent
+- **UTC+13 timezone wrapping bug**: Hour-only offset calculation via `Intl.DateTimeFormat` with just `hour` component wraps UTC+13 to -11. Fix: use full date components (year, month, day, hour, minute, second) to compute offset from a known UTC reference point. The `_getUTCWindowForLocalDate()` helper in resolver.js and metar-observer.js is the canonical implementation.
 
 ## Supabase Unbounded Queries
 - `_recordAccuracy()` was fetching ALL 28k+ opportunities every 5 minutes — no date filter or limit

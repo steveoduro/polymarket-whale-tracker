@@ -84,7 +84,7 @@ const config = {
 
   // ── Observer ─────────────────────────────────────────────────────
   observer: {
-    POLL_INTERVAL_MINUTES: 30,     // how often to poll METAR observations
+    POLL_INTERVAL_MINUTES: 10,     // how often to poll METAR observations
     ACTIVE_HOURS: { start: 6, end: 23 },  // local time range to poll (skip overnight)
   },
 
