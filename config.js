@@ -58,6 +58,20 @@ const config = {
       'medium': 2.22,                   // ~4.0°F — sources agree within 4°F
       'low': 2.78,                      // ~5.0°F — large disagreement or single source
     },
+    CITY_ELIGIBILITY: {                 // Block trades in cities where forecast MAE is too high for the range type
+      BOUNDED_MAX_MAE_F: 2.5,          // max MAE (°F) for bounded range trades (typically 2°F wide)
+      BOUNDED_MAX_MAE_C: 1.5,          // max MAE (°C) for bounded range trades
+      UNBOUNDED_MAX_MAE_F: 4.0,        // max MAE (°F) for unbounded range trades
+      UNBOUNDED_MAX_MAE_C: 2.0,        // max MAE (°C) for unbounded range trades
+      MIN_SAMPLES: 5,                   // minimum accuracy records before gating (below this, allow all)
+    },
+    SOURCE_MANAGEMENT: {                // Per-city source promotion/demotion thresholds
+      DEMOTION_MAE_F: 4.0,             // demote source from city ensemble if MAE > this (°F)
+      DEMOTION_MAE_C: 2.0,             // same for °C cities
+      MIN_SAMPLES: 7,                   // minimum records before demoting (higher bar — one bad week shouldn't kill a source)
+      MIN_ACTIVE_SOURCES: 2,            // never demote below this many active sources per city
+      WEIGHT_MIN_SAMPLES: 5,            // minimum records before weighting (below this, equal weight)
+    },
   },
 
   // ── Snapshots ────────────────────────────────────────────────────
