@@ -38,7 +38,8 @@ const config = {
 
   // ── Exit ─────────────────────────────────────────────────────────
   exit: {
-    EVALUATOR_MODE: 'log_only',         // 'log_only' | 'active'
+    EVALUATOR_MODE: 'log_only',         // 'log_only' | 'active' (applies to signals NOT in ACTIVE_SIGNALS)
+    ACTIVE_SIGNALS: ['guaranteed_loss', 'guaranteed_win'],  // these signal types always execute regardless of EVALUATOR_MODE
   },
 
   // ── Forecasts ────────────────────────────────────────────────────
