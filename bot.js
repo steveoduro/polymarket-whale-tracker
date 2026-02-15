@@ -127,18 +127,33 @@ class Bot {
       this.alerts.error(`Monitor cycle #${this.cycleCount}`, err);
     }
 
-    // 4. METAR Observer: poll intraday observations for open positions
+    // 4. METAR Observer: poll intraday observations for all cities
+    let observerRanThisCycle = false;
     try {
       const observerIntervalMs = config.observer.POLL_INTERVAL_MINUTES * 60 * 1000;
       if (Date.now() - this.lastObserverAt >= observerIntervalMs) {
         const obsResult = await this.observer.observe();
         this.lastObserverAt = Date.now();
+        observerRanThisCycle = true;
         if (obsResult.citiesPolled > 0) {
           this._log('info', `Observer: ${obsResult.citiesPolled} cities polled, ${obsResult.newHighs} new highs`);
         }
       }
     } catch (err) {
       this._log('error', `Observer failed in cycle #${this.cycleCount}`, { error: err.message });
+    }
+
+    // 4a. Guaranteed-win entries: observation-based risk-free trades
+    try {
+      if (config.guaranteed_entry?.ENABLED && observerRanThisCycle) {
+        const gwResult = await this.scanner.scanGuaranteedWins();
+        if (gwResult.entries.length > 0) {
+          const gwTrades = await this.executor.executeGuaranteedWins(gwResult.entries);
+          this._log('info', `Guaranteed wins: ${gwResult.entries.length} found, ${gwTrades.length} entered`);
+        }
+      }
+    } catch (err) {
+      this._log('error', `Guaranteed-win scan failed`, { error: err.message });
     }
 
     // 5. Resolver: resolve trades, backfill opportunities, record accuracy

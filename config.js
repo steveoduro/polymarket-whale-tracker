@@ -105,6 +105,16 @@ const config = {
     },
   },
 
+  // ── Guaranteed Entry ─────────────────────────────────────────────
+  guaranteed_entry: {
+    ENABLED: true,
+    MIN_MARGIN_CENTS: 5,              // minimum profit per share after fees (cents)
+    MAX_ASK: 0.97,                    // don't buy above 97¢
+    MIN_ASK: 0.30,                    // safety floor — if ask < 30¢, observation might be wrong
+    MAX_BANKROLL_PCT: 0.15,           // 15% of matching-side bankroll per guaranteed-win trade
+    REQUIRE_DUAL_CONFIRMATION: true,  // require both WU and METAR to agree
+  },
+
   // ── Observer ─────────────────────────────────────────────────────
   observer: {
     POLL_INTERVAL_MINUTES: 10,     // how often to poll METAR observations
