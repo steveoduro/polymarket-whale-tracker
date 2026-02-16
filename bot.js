@@ -17,6 +17,7 @@ const Monitor = require('./lib/monitor');
 const Resolver = require('./lib/resolver');
 const METARObserver = require('./lib/metar-observer');
 const Alerts = require('./lib/alerts');
+const peakHours = require('./lib/peak-hours');
 
 class Bot {
   constructor() {
@@ -59,6 +60,9 @@ class Bot {
     this._log('info', `Exit evaluator: ${config.exit.EVALUATOR_MODE}`);
     this._log('info', `Bankroll: YES $${config.sizing.YES_BANKROLL} / NO $${config.sizing.NO_BANKROLL}`);
     this._log('info', '═══════════════════════════════════════════════════');
+
+    // Initialize dynamic per-city peak hours from METAR history
+    await peakHours.initialize();
 
     // Initialize executor bankrolls from existing open trades
     await this.executor.initBankrolls();

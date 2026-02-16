@@ -137,7 +137,12 @@ const config = {
   observer: {
     POLL_INTERVAL_MINUTES: 10,     // how often to poll METAR observations
     ACTIVE_HOURS: { start: 6, end: 23 },  // local time range to poll (skip overnight)
-    COOLING_HOUR: 18,              // local hour after which temps are assumed to only drop (6pm)
+    COOLING_HOUR: 17,              // fallback default if no METAR history (5 PM)
+    DYNAMIC_PEAK_HOUR: true,       // enable per-city peak hour from METAR data
+    PEAK_HOUR_BUFFER: 2,           // hours after observed average peak = cooling hour
+    PEAK_HOUR_MIN: 14,             // floor clamp (2 PM — no city peaks before this)
+    PEAK_HOUR_MAX: 20,             // ceiling clamp (8 PM — safety upper bound)
+    PEAK_HOUR_MIN_SAMPLES: 3,      // minimum peak observations before trusting dynamic value
   },
 
   // ── Observation Entry Gate ──────────────────────────────────────
