@@ -8,6 +8,7 @@
  */
 
 const config = require('./config');
+const { db } = require('./lib/db');
 const PlatformAdapter = require('./lib/platform-adapter');
 const ForecastEngine = require('./lib/forecast-engine');
 const Scanner = require('./lib/scanner');
@@ -113,6 +114,15 @@ class Bot {
     try {
       if (scanResult.opportunities.length > 0) {
         trades = await this.executor.execute(scanResult.opportunities);
+
+        // Fix data quality: update opportunities the executor rejected
+        // (bankroll, volume, dedup, etc.) so they don't show as 'entered' in DB
+        const enteredOppIds = new Set(trades.map(t => t.opportunity_id).filter(Boolean));
+        for (const opp of scanResult.opportunities) {
+          if (opp.opportunity_id && !enteredOppIds.has(opp.opportunity_id)) {
+            await db.from('opportunities').update({ action: 'executor_blocked' }).eq('id', opp.opportunity_id);
+          }
+        }
       }
     } catch (err) {
       this._log('error', `Executor failed in cycle #${this.cycleCount}`, { error: err.message });

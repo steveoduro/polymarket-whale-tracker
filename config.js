@@ -40,6 +40,13 @@ const config = {
   exit: {
     EVALUATOR_MODE: 'log_only',         // 'log_only' | 'active' (applies to signals NOT in ACTIVE_SIGNALS)
     ACTIVE_SIGNALS: ['guaranteed_loss', 'guaranteed_win'],  // these signal types always execute regardless of EVALUATOR_MODE
+    TAKE_PROFIT: {
+      OBSERVATION_SPIKE: {
+        ENABLED: true,                  // detect unconfirmed bid spikes on YES unbounded upper
+        TRIGGER_BID: 0.50,              // bid must be above this to trigger
+        MODE: 'log_only',              // 'log_only' | 'active' — promote after 3-5 days of validated signals
+      },
+    },
   },
 
   // ── Forecasts ────────────────────────────────────────────────────
@@ -67,11 +74,13 @@ const config = {
       MIN_SAMPLES: 5,                   // minimum accuracy records before gating (below this, allow all)
     },
     SOURCE_MANAGEMENT: {                // Per-city source promotion/demotion thresholds
-      DEMOTION_MAE_F: 4.0,             // demote source from city ensemble if MAE > this (°F)
-      DEMOTION_MAE_C: 2.0,             // same for °C cities
+      DEMOTION_MAE_F: 4.0,             // absolute ceiling — always demote above this (°F)
+      DEMOTION_MAE_C: 2.0,             // absolute ceiling — always demote above this (°C)
+      RELATIVE_DEMOTION_FACTOR: 1.8,   // demote if MAE > 1.8x best source for that city
+      SOFT_DEMOTION_MAX_WEIGHT: 0.10,  // max weight for soft-demoted sources (10%) — used when MIN_ACTIVE prevents full demotion
       MIN_SAMPLES: 7,                   // minimum records before demoting (higher bar — one bad week shouldn't kill a source)
-      MIN_ACTIVE_SOURCES: 2,            // never demote below this many active sources per city
-      WEIGHT_MIN_SAMPLES: 5,            // minimum records before weighting (below this, equal weight)
+      MIN_ACTIVE_SOURCES: 2,            // never fully demote below this many active sources (soft demotion still applies)
+      WEIGHT_MIN_SAMPLES: 3,            // minimum records before weighting (lowered from 5 to activate with existing data)
     },
   },
 
@@ -119,6 +128,7 @@ const config = {
   observer: {
     POLL_INTERVAL_MINUTES: 10,     // how often to poll METAR observations
     ACTIVE_HOURS: { start: 6, end: 23 },  // local time range to poll (skip overnight)
+    COOLING_HOUR: 18,              // local hour after which temps are assumed to only drop (6pm)
   },
 
   // ── Cities ───────────────────────────────────────────────────────
