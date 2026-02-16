@@ -140,6 +140,13 @@ const config = {
     COOLING_HOUR: 18,              // local hour after which temps are assumed to only drop (6pm)
   },
 
+  // ── Observation Entry Gate ──────────────────────────────────────
+  observation_entry_gate: {
+    ENABLED: true,
+    BOUNDARY_BUFFER_F: 1.0,  // Block if running high is within 1°F of range ceiling
+    BOUNDARY_BUFFER_C: 0.5,  // Block if running high is within 0.5°C of range ceiling
+  },
+
   // ── Cities ───────────────────────────────────────────────────────
   // All cities from both platforms. Easy to add/remove.
   // wuCountry: ISO 2-letter country code for Weather Underground API (STATION:9:COUNTRY)
