@@ -73,6 +73,15 @@ const config = {
       UNBOUNDED_MAX_MAE_C: 2.0,        // max MAE (°C) for unbounded range trades
       MIN_SAMPLES: 5,                   // minimum accuracy records before gating (below this, allow all)
     },
+    ENSEMBLE_SPREAD: {
+      ENABLED: false,          // flip to true after 7-10 days of baseline
+      MIN_BASELINE_DAYS: 7,
+      MULTIPLIER_FLOOR: 0.5,
+      MULTIPLIER_CEILING: 2.0,
+    },
+    MOS: {
+      SHADOW_ONLY: true,       // flip to false to promote to active ensemble member
+    },
     SOURCE_MANAGEMENT: {                // Per-city source promotion/demotion thresholds
       DEMOTION_MAE_F: 4.0,             // absolute ceiling — always demote above this (°F)
       DEMOTION_MAE_C: 2.0,             // absolute ceiling — always demote above this (°C)
