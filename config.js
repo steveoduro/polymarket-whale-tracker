@@ -25,6 +25,12 @@ const config = {
     YES_MAX_FORECAST_DISTANCE: 3.0,    // candidates within this many stddevs of forecast
   },
 
+  // ── Calibration Thresholds ─────────────────────────────────────
+  calibration: {
+    CAL_BLOCKS_MIN_N: 25,        // minimum n for calBlocksEdge (blocking negative-edge buckets)
+    CAL_CONFIRMS_MIN_N: 50,      // minimum n for calConfirmsEdge, Kelly override, hold override
+  },
+
   // ── Position Sizing ──────────────────────────────────────────────
   sizing: {
     KELLY_FRACTION: 0.5,
