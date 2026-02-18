@@ -27,7 +27,7 @@ const config = {
 
   // ── Calibration Thresholds ─────────────────────────────────────
   calibration: {
-    CAL_BLOCKS_MIN_N: 25,        // minimum n for calBlocksEdge (blocking negative-edge buckets)
+    CAL_BLOCKS_MIN_N: 15,        // minimum n (unique markets) for calBlocksEdge (blocking negative-edge buckets)
     CAL_CONFIRMS_MIN_N: 50,      // minimum n for calConfirmsEdge, Kelly override, hold override
   },
 
