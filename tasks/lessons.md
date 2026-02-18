@@ -238,6 +238,28 @@
 - During Supabase platform outage, this hammered the recovering DB
 - Fix: scope to `resolved_at >= 2 days ago` with `.limit(500)` — sufficient for accuracy tracking
 
+## Platform-Aware Guaranteed Loss (Feb 18, 2026)
+- `running_high = Math.max(METAR, WU)` — can overshoot reality. Safe for guaranteed_win (conservative), **dangerous for guaranteed_loss** (triggers false exits).
+- Use `wu_high` (WU-only reading) for guaranteed_loss "exceeded" checks — WU is Polymarket's resolution source; for Kalshi, `min(METAR, WU) = wu_high` means "both agree".
+- For "didn't reach" day-over checks, `running_high` (Math.max) is safe — if the max hasn't reached the range, neither source has.
+- **Case study**: Miami 86-87°F was exited as guaranteed_loss (METAR obs_high=85°F overshoot) but WU actual=86°F (in range, trade won).
+- Always null-guard `wu_high` — WU API can fail while METAR succeeds. Falling through to "undecided" is safer than a wrong guaranteed_loss.
+
+## Monitor Must Mirror Scanner Entry Logic
+- Any bypass in scanner (e.g., calConfirmsEdge) needs a corresponding hold logic in monitor. Otherwise monitor's edge_gone will immediately kill trades that scanner entered with calibration-justified edge.
+- Pattern: scanner enters at unfavorable raw probability because calibration says the trade wins historically → monitor sees low probability → edge_gone fires → trade killed immediately.
+- Fix: monitor loads `market_calibration` table and suppresses edge_gone when `empirical_win_rate > marketBid`.
+
+## Audit Trail Fields at Exit Time
+- `won`, `actual_temp`, `observation_high`, `wu_high` must all be populated in EVERY exit path: monitor's `_resolveGuaranteed()`, monitor's `_executeExit()`, and resolver's `_resolveTrades()`.
+- Historical backfill via `_backfillExitedTrades()` handles records created before the fix.
+- Pre-observer era trades (before Feb 13) will permanently have NULL observation fields — no data exists.
+
+## Column Names (Trades Table)
+- Use `entry_ask` not `entry_price`, `range_name` not `range_label`
+- Status values: `open`, `exited`, `resolved` (NOT `active`)
+- metar_observations: `wu_high_f`/`wu_high_c` stored separately from `running_high_f`/`running_high_c`
+
 ---
 
 *Add new lessons as discovered from paper trading and live trading.*
