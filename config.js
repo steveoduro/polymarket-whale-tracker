@@ -23,6 +23,8 @@ const config = {
     MAX_MODEL_MARKET_RATIO: 3.0,       // reject if model prob > 3x market price (temporary guardrail)
     YES_CANDIDATE_COUNT: 5,            // number of YES candidate ranges to evaluate per city/date
     YES_MAX_FORECAST_DISTANCE: 3.0,    // candidates within this many stddevs of forecast
+    MAX_ENSEMBLE_SPREAD_F: 7.0,        // max source disagreement in °F — conservative start
+    MAX_ENSEMBLE_SPREAD_C: 4.0,        // max source disagreement in °C
   },
 
   // ── Calibration Thresholds ─────────────────────────────────────
@@ -75,11 +77,12 @@ const config = {
       'low': 2.78,                      // ~5.0°F — large disagreement or single source
     },
     CITY_ELIGIBILITY: {                 // Block trades in cities where forecast MAE is too high for the range type
-      BOUNDED_MAX_MAE_F: 2.5,          // max MAE (°F) for bounded range trades (typically 2°F wide)
-      BOUNDED_MAX_MAE_C: 1.5,          // max MAE (°C) for bounded range trades
-      UNBOUNDED_MAX_MAE_F: 4.0,        // max MAE (°F) for unbounded range trades
-      UNBOUNDED_MAX_MAE_C: 2.0,        // max MAE (°C) for unbounded range trades
+      BOUNDED_MAX_MAE_F: 1.8,          // was 2.5 — backtest shows profitability requires ≤1.8
+      BOUNDED_MAX_MAE_C: 1.0,          // was 1.5 — equivalent tightening for °C cities
+      UNBOUNDED_MAX_MAE_F: 2.7,        // was 4.0 — unbounded more forgiving but 4.0 was extreme
+      UNBOUNDED_MAX_MAE_C: 1.5,        // was 2.0
       MIN_SAMPLES: 5,                   // minimum accuracy records before gating (below this, allow all)
+      PREFER_ENSEMBLE_MAE: true,       // use corrected ensemble MAE when available, fallback to per-source residual MAE
     },
     ENSEMBLE_SPREAD: {
       ENABLED: false,          // flip to true after 7-10 days of baseline
