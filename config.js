@@ -21,6 +21,8 @@ const config = {
     MIN_NO_ASK_PRICE: 0.05,            // NO-side floor (NO ask 5¢ = YES bid 95¢)
     MIN_HOURS_TO_RESOLUTION: 8,        // don't bet on already-known outcomes
     MAX_MODEL_MARKET_RATIO: 3.0,       // reject if model prob > 3x market price (temporary guardrail)
+    YES_CANDIDATE_COUNT: 5,            // number of YES candidate ranges to evaluate per city/date
+    YES_MAX_FORECAST_DISTANCE: 3.0,    // candidates within this many stddevs of forecast
   },
 
   // ── Position Sizing ──────────────────────────────────────────────
