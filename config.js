@@ -25,6 +25,7 @@ const config = {
     YES_MAX_FORECAST_DISTANCE: 3.0,    // candidates within this many stddevs of forecast
     MAX_ENSEMBLE_SPREAD_F: 7.0,        // max source disagreement in °F — conservative start
     MAX_ENSEMBLE_SPREAD_C: 4.0,        // max source disagreement in °C
+    MAX_STD_RANGE_RATIO: 2.0,          // block bounded YES if std_dev (market unit) > 2x range_width
   },
 
   // ── Calibration Thresholds ─────────────────────────────────────
