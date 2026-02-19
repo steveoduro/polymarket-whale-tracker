@@ -125,7 +125,8 @@ const config = {
       clobUrl: 'https://clob.polymarket.com',
     },
     kalshi: {
-      enabled: true,
+      enabled: true,                                // keep true — scanner still logs for calibration
+      tradingEnabled: false,                        // NEW: blocks new entries, keeps scanning + logging
       feeRate: 0,                             // Legacy flat rate (unused) — see takerFeeMultiplier
       takerFeeMultiplier: 0.07,               // Actual fee: 0.07 * P * (1-P) per contract, charged at entry only
       apiUrl: 'https://api.elections.kalshi.com/trade-api/v2',
