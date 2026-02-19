@@ -260,6 +260,19 @@
 - Status values: `open`, `exited`, `resolved` (NOT `active`)
 - metar_observations: `wu_high_f`/`wu_high_c` stored separately from `running_high_f`/`running_high_c`
 
+## Calibration Data Quality
+- **Bucket win attribution inflation**: `would_have_won` is set per-row (per scan cycle) based on whether the range won, not the entry price. A market moving through multiple price/time buckets credits a win to ALL buckets. This inflates cheap-bucket and long-lead-time win rates. Impact: `calConfirmsEdge` becomes too permissive for marginal trades.
+- **model_valid field must be in .select() or filtered at DB level**: `row.model_valid === false` with strict equality returns false when field is undefined (not selected). Result: invalid model runs silently included in calibration. Fix: filter at DB level with `.or('model_valid.is.null,model_valid.eq.true')`.
+- **Supabase JS client caps at 1000 rows by default**: Analysis scripts using `.select()` without `.limit()` or pagination silently return max 1000 rows. Use `exec_sql` RPC for full counts, or set explicit high limits.
+
+## Shadow Source Management
+- **MOS SHADOW_ONLY was dead code**: Config flag existed but was never read by forecast-engine. Active-set initialization (`rankings.map(r => r.source)`) included ALL ranked sources regardless of config flags.
+- **MOS missing weight entry caused equal-weight fallback**: MOS with n<WEIGHT_MIN had no weight entry, causing `activeSourceKeys.every(k => cityWeights[k])` to fail → all cities with MOS in their rankings fell back to equal-weight averaging. Removing shadow sources from active set fixes this.
+- **fahrenheitToCelsius() vs delta conversion**: For std dev, spread, and other deltas, multiply by 5/9 (C→F: multiply by 9/5). `fahrenheitToCelsius()` is for absolute temperatures ONLY. Getting this wrong over/under-states gates by ~17°.
+
+## Resolver Accuracy Recording
+- **Skip bug pattern**: Checking "any accuracy record exists" before recording blocks new record types (e.g., ensemble_corrected) when per-source records already exist. Fix: check each record type independently.
+
 ---
 
 *Add new lessons as discovered from paper trading and live trading.*
