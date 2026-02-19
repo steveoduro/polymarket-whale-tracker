@@ -223,35 +223,35 @@ class Bot {
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────
+// Only start when run directly (not when required by other scripts)
 
-const bot = new Bot();
+if (require.main === module || process.env.pm_id !== undefined) {
+  const bot = new Bot();
 
-process.on('SIGINT', async () => {
-  bot.stop();
-  process.exit(0);
-});
+  process.on('SIGINT', async () => {
+    bot.stop();
+    process.exit(0);
+  });
 
-process.on('SIGTERM', async () => {
-  bot.stop();
-  process.exit(0);
-});
+  process.on('SIGTERM', async () => {
+    bot.stop();
+    process.exit(0);
+  });
 
-process.on('uncaughtException', (err) => {
-  console.error(`[FATAL] Uncaught exception: ${err.message}\n${err.stack}`);
-  bot.alerts.sendNow(`🚨 FATAL: ${err.message}`).catch(() => {}).finally(() => process.exit(1));
-});
+  process.on('uncaughtException', (err) => {
+    console.error(`[FATAL] Uncaught exception: ${err.message}\n${err.stack}`);
+    bot.alerts.sendNow(`🚨 FATAL: ${err.message}`).catch(() => {}).finally(() => process.exit(1));
+  });
 
-process.on('unhandledRejection', (reason) => {
-  console.error(`[FATAL] Unhandled rejection: ${reason}`);
-  bot.alerts.sendNow(`🚨 UNHANDLED REJECTION: ${reason}`).catch(() => {});
-});
+  process.on('unhandledRejection', (reason) => {
+    console.error(`[FATAL] Unhandled rejection: ${reason}`);
+    bot.alerts.sendNow(`🚨 UNHANDLED REJECTION: ${reason}`).catch(() => {});
+  });
 
-// Only auto-start when run directly (not when required by other scripts)
-if (require.main === module) {
   bot.start().catch(err => {
     console.error(`[FATAL] Bot failed to start: ${err.message}\n${err.stack}`);
     process.exit(1);
   });
 }
 
-module.exports = WeatherBot;
+module.exports = Bot;
