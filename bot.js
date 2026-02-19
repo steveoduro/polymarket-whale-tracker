@@ -246,7 +246,12 @@ process.on('unhandledRejection', (reason) => {
   bot.alerts.sendNow(`🚨 UNHANDLED REJECTION: ${reason}`).catch(() => {});
 });
 
-bot.start().catch(err => {
-  console.error(`[FATAL] Bot failed to start: ${err.message}\n${err.stack}`);
-  process.exit(1);
-});
+// Only auto-start when run directly (not when required by other scripts)
+if (require.main === module) {
+  bot.start().catch(err => {
+    console.error(`[FATAL] Bot failed to start: ${err.message}\n${err.stack}`);
+    process.exit(1);
+  });
+}
+
+module.exports = WeatherBot;
