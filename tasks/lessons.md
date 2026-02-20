@@ -161,6 +161,13 @@
 - Win PnL (Kalshi): `revenue - cost - entryFee`; Loss PnL: `-cost - entryFee`
 - Win PnL (Polymarket): `revenue - cost`; Loss PnL: `-cost`
 
+## Probability Calculation
+- **Empirical CDF must use ensemble_corrected errors, not per-source**: Per-source errors are ~1.5-2x wider than ensemble (which is what we actually trade on). Using per-source errors inflated probabilities by 20-40pp in 5 cities.
+- **normalCDF A&S implementation**: The 7.1.26 coefficients approximate `erfc(z)` using `exp(-z²)`. Must transform `z = |x|/√2` first. Using `exp(-x²/2)` with `Math.abs(x)` gives 2.9% error at 1σ. Fixed: use `Math.SQRT2` and `exp(-z*z)`.
+- **cityStdDevs should prefer ensemble_corrected data**: Per-source pooled residual std dev overestimates ensemble uncertainty by ~1.5-2x. Added ensemble override query; falls back to per-source when ensemble samples insufficient.
+- **Calibration cache is 6 hours**: After fixing probability calculations, must restart bot to flush the cache. The resolver may update DB tables, but the forecast-engine won't reload them until cache expires.
+- **Validation: check calibration buckets**: The model calibration `calibrationBuckets` should show win rates close to nominal (e.g., 50-75% bucket ≈ 62% win rate). If win rates are far off (17.5% pre-fix), the probability model is miscalibrated.
+
 ## Forecast Std Dev Calibration
 - Default std devs were 2-3x too small (1°F day-1 vs empirical 2.5-3.5°F)
 - Correct base values (day-1): very-high=2.5°F, high=3.0°F, medium=4.0°F, low=5.0°F
