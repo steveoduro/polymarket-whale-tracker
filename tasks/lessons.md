@@ -276,6 +276,13 @@
 - **Backfill is possible when raw inputs are stored**: Historical opportunities store `forecast_temp`, `ensemble_std_dev`, `range_min`, `range_max`, `range_unit` — enough to recompute probabilities. Lesson: always store raw inputs alongside computed outputs.
 - **After probability fixes, set model_valid=false then backfill**: Don't just invalidate — recalculate with the corrected formula and set model_valid=true. This preserves calibration data continuity instead of losing days/weeks of resolution history.
 
+## Filter Bypass Safety
+- **calConfirmsEdge must require positive model edge**: Without a floor, a coarse bucket's historical win rate can override the model for trades with -11.98% edge. A single bucket (`bounded|36h+|15-20c`) was entering trades across 5 different cities with different forecasts. Fix: require `edgePct >= 0`.
+- **NO trades need a price window, not just a floor**: Only the 20-30¢ NO ask bucket is profitable (71.4% win rate). Below 20¢ (50% win) and above 30¢ (16.7% win) both lose money. Cap both ends with MIN/MAX_NO_ASK_PRICE.
+- **calConfirmsEdge also bypasses MAX_MODEL_MARKET_RATIO**: It's a two-gate bypass, not one. As calibration data grows and calConfirmsEdge fires more often, monitor for over-permissiveness.
+- **Silent fallbacks are dangerous**: `_getModelCalibration` returned null (ratio=1.0) with no log signal for weeks. Always log when a safety mechanism falls back to its default. A single summary line per cycle is enough.
+- **ensemble_std_dev is source agreement, not forecast error**: All sources can cluster and be wrong together (e.g., Atlanta cold-biased). Low spread ≠ low error. The empirical CDF and cityStdDevs fixes address this but need time to activate.
+
 ## Shadow Source Management
 - **MOS SHADOW_ONLY was dead code**: Config flag existed but was never read by forecast-engine. Active-set initialization (`rankings.map(r => r.source)`) included ALL ranked sources regardless of config flags.
 - **MOS missing weight entry caused equal-weight fallback**: MOS with n<WEIGHT_MIN had no weight entry, causing `activeSourceKeys.every(k => cityWeights[k])` to fail → all cities with MOS in their rankings fell back to equal-weight averaging. Removing shadow sources from active set fixes this.
