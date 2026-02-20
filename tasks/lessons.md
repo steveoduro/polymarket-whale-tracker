@@ -134,7 +134,8 @@
 
 ## Server Management Bot
 - VPS management Telegram bot at `/home/deployer/server-tools/server-bot.js` (Telegraf framework)
-- Separate `.env` at `/home/deployer/server-tools/.env` — different Telegram bot token, same Supabase creds
+- Separate `.env` at `/home/deployer/server-tools/.env` — different Telegram bot token, uses `DATABASE_URL` for local PG
+- Server-bot is NOT in git — lives outside the polymarket repo, changes are unversioned
 - `KNOWN_KALSHI_TICKERS` hardcoded in server-bot — must be manually synced with `WEATHER_SERIES` in `kalshi-api.js`
 - Kalshi series discovery uses public API (`/series?limit=500`) — no auth needed
 - Filter new series by `KXHIGH*` prefix with exclude patterns (`INFLATION`, `MOV`, `INX`, `US`, `NFL`, `MODEL`, `MAXTEMP`, `DV`) — Kalshi returns non-weather series too
@@ -272,6 +273,15 @@
 
 ## Resolver Accuracy Recording
 - **Skip bug pattern**: Checking "any accuracy record exists" before recording blocks new record types (e.g., ensemble_corrected) when per-source records already exist. Fix: check each record type independently.
+
+## PostgreSQL Migration (from Supabase)
+- **node-postgres `numeric` (OID 1700) returns strings**: Must add `pg.types.setTypeParser(1700, (val) => parseFloat(val))` globally in db.js. Without this, all arithmetic on numeric columns produces NaN via string concatenation.
+- **JSONB columns need explicit `JSON.stringify()`**: Supabase JS client auto-serialized JS objects to JSONB; raw pg parameterized queries do not. Must wrap all JSONB params in `JSON.stringify()`.
+- **Supabase `.from().select().eq()` → raw SQL**: Pattern: `.from('table').select('*').eq('col', val)` becomes `pool.query('SELECT * FROM table WHERE col = $1', [val])`. Supabase `.order()` → `ORDER BY`, `.limit()` → `LIMIT`, `.gte()` → `>=`, `.in()` → `ANY($n)`.
+- **Supabase `.upsert()` → `INSERT ... ON CONFLICT ... DO UPDATE`**: Must specify conflict columns explicitly. Supabase auto-detects primary key.
+- **PM2 dependency changes**: After adding new npm packages, `pm2 restart` may not pick them up. Use `pm2 delete <name>` + `pm2 start <script> --name <name>` for a clean start, then `pm2 save`.
+- **Tailscale for secure PG access**: Listen on Tailscale IP in postgresql.conf, allow 100.64.0.0/10 in pg_hba.conf. No public internet exposure needed.
+- **`.pgpass` is host-specific**: Need separate entries for `localhost` and Tailscale IP (100.78.2.17). Format: `host:port:db:user:password`, chmod 600.
 
 ---
 
