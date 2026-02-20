@@ -27,6 +27,7 @@ const config = {
     MAX_ENSEMBLE_SPREAD_F: 7.0,        // max source disagreement in °F — conservative start
     MAX_ENSEMBLE_SPREAD_C: 4.0,        // max source disagreement in °C
     MAX_STD_RANGE_RATIO: 2.0,          // block bounded YES if std_dev (market unit) > 2x range_width
+    MAX_MARKET_DIVERGENCE_C: 1.0,     // block YES if model-vs-market temp divergence > 1°C (all profit comes from <1°C agreement)
   },
 
   // ── Calibration Thresholds ─────────────────────────────────────
