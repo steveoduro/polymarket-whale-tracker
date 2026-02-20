@@ -11,7 +11,7 @@
  */
 
 const config = require('../config');
-const { db } = require('../lib/db');
+const { query } = require('../lib/db');
 
 const WU_HISTORY_BASE = 'https://www.wunderground.com/history/daily';
 const WU_CITY_PATHS = {
@@ -53,20 +53,24 @@ function getWUUrl(city, dateStr) {
 (async () => {
   const dateArg = process.argv.find((a, i) => process.argv[i - 1] === '--date');
 
-  let query = db
-    .from('trades')
-    .select('id, city, target_date, platform, side, range_name, actual_temp, range_unit, won, pnl, resolution_station, resolved_at')
-    .eq('status', 'resolved')
-    .eq('platform', 'polymarket')
-    .order('resolved_at', { ascending: false });
+  let sql = `SELECT id, city, target_date, platform, side, range_name,
+                    actual_temp, range_unit, won, pnl, resolution_station, resolved_at
+             FROM trades
+             WHERE status = $1 AND platform = $2`;
+  const params = ['resolved', 'polymarket'];
 
   if (dateArg) {
-    query = query.eq('target_date', dateArg);
-  } else {
-    query = query.limit(30);
+    sql += ' AND target_date = $3';
+    params.push(dateArg);
   }
 
-  const { data: trades, error } = await query;
+  sql += ' ORDER BY resolved_at DESC';
+
+  if (!dateArg) {
+    sql += ' LIMIT 30';
+  }
+
+  const { data: trades, error } = await query(sql, params);
   if (error) { console.error('DB error:', error.message); process.exit(1); }
 
   if (!trades || trades.length === 0) {

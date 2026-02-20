@@ -8,7 +8,7 @@
  */
 
 const config = require('./config');
-const { db } = require('./lib/db');
+const { query } = require('./lib/db');
 const PlatformAdapter = require('./lib/platform-adapter');
 const ForecastEngine = require('./lib/forecast-engine');
 const Scanner = require('./lib/scanner');
@@ -124,7 +124,7 @@ class Bot {
         const enteredOppIds = new Set(trades.map(t => t.opportunity_id).filter(Boolean));
         for (const opp of scanResult.opportunities) {
           if (opp.opportunity_id && !enteredOppIds.has(opp.opportunity_id)) {
-            await db.from('opportunities').update({ action: 'executor_blocked' }).eq('id', opp.opportunity_id);
+            await query('UPDATE opportunities SET action = $1 WHERE id = $2', ['executor_blocked', opp.opportunity_id]);
           }
         }
       }
