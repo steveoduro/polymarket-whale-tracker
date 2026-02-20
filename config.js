@@ -18,7 +18,7 @@ const config = {
     MAX_SPREAD: 0.15,                   // hard spread cap in dollars
     MAX_SPREAD_PCT: 0.50,              // reject if spread > 50% of ask price
     MIN_ASK_PRICE: 0.10,               // skip YES trades below 10¢ (ghost markets)
-    MIN_NO_ASK_PRICE: 0.05,            // NO-side floor (NO ask 5¢ = YES bid 95¢)
+    MIN_NO_ASK_PRICE: 0.20,            // NO-side floor — only 20-30¢ bucket is profitable (71.4% win rate)
     MIN_HOURS_TO_RESOLUTION: 8,        // don't bet on already-known outcomes
     MAX_MODEL_MARKET_RATIO: 3.0,       // reject if model prob > 3x market price (temporary guardrail)
     YES_CANDIDATE_COUNT: 5,            // number of YES candidate ranges to evaluate per city/date
