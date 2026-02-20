@@ -272,6 +272,9 @@
 - **Bucket win attribution inflation**: `would_have_won` is set per-row (per scan cycle) based on whether the range won, not the entry price. A market moving through multiple price/time buckets credits a win to ALL buckets. This inflates cheap-bucket and long-lead-time win rates. Impact: `calConfirmsEdge` becomes too permissive for marginal trades.
 - **model_valid field must be in .select() or filtered at DB level**: `row.model_valid === false` with strict equality returns false when field is undefined (not selected). Result: invalid model runs silently included in calibration. Fix: filter at DB level with `.or('model_valid.is.null,model_valid.eq.true')`.
 - **Supabase JS client caps at 1000 rows by default**: Analysis scripts using `.select()` without `.limit()` or pagination silently return max 1000 rows. Use `exec_sql` RPC for full counts, or set explicit high limits.
+- **Unbounded calibration queries are time bombs**: `model_calibration` and `market_calibration` had no time window — accumulated ALL historical data. When probability calculations had bugs, contaminated data dominated good data permanently. Fix: always add `AND target_date >= CURRENT_DATE - INTERVAL '60 days'` to calibration queries.
+- **Backfill is possible when raw inputs are stored**: Historical opportunities store `forecast_temp`, `ensemble_std_dev`, `range_min`, `range_max`, `range_unit` — enough to recompute probabilities. Lesson: always store raw inputs alongside computed outputs.
+- **After probability fixes, set model_valid=false then backfill**: Don't just invalidate — recalculate with the corrected formula and set model_valid=true. This preserves calibration data continuity instead of losing days/weeks of resolution history.
 
 ## Shadow Source Management
 - **MOS SHADOW_ONLY was dead code**: Config flag existed but was never read by forecast-engine. Active-set initialization (`rankings.map(r => r.source)`) included ALL ranked sources regardless of config flags.
