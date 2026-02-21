@@ -34,6 +34,7 @@ const config = {
   calibration: {
     CAL_BLOCKS_MIN_N: 15,        // minimum n (unique markets) for calBlocksEdge (blocking negative-edge buckets)
     CAL_CONFIRMS_MIN_N: 50,      // minimum n for calConfirmsEdge, Kelly override, hold override
+    CAL_MIN_TRADE_EDGE: 0.03,    // minimum (empirical_win_rate - ask) gap for calConfirmsEdge (3pp)
   },
 
   // ── Position Sizing ──────────────────────────────────────────────
