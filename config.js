@@ -66,7 +66,7 @@ const config = {
   forecasts: {
     CACHE_MINUTES: 15,
     CALIBRATION_WINDOW_DAYS: 21,        // rolling window for bias/std dev calibration (seasonal adaptation)
-    MIN_CITY_STDDEV_SAMPLES: 10,       // minimum samples for per-city std dev (falls back to pooled)
+    MIN_CITY_STDDEV_SAMPLES: 20,       // minimum samples for per-city std dev (falls back to pooled)
     LEAD_TIME_BUCKETS: [               // lead-time bias bucketing (narrowed from audit data)
       { name: 'near', min: 0, max: 6 },            // 0-6h — at/near resolution
       { name: 'same-day', min: 7, max: 24 },       // 7-24h — same day
