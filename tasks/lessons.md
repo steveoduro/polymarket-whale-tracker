@@ -300,6 +300,19 @@
 - **Tailscale for secure PG access**: Listen on Tailscale IP in postgresql.conf, allow 100.64.0.0/10 in pg_hba.conf. No public internet exposure needed.
 - **`.pgpass` is host-specific**: Need separate entries for `localhost` and Tailscale IP (100.78.2.17). Format: `host:port:db:user:password`, chmod 600.
 
+## Kalshi-Specific Lessons (Feb 21, 2026)
+- **All Kalshi station configs were already correct** — Kalshi API `rules_primary` field on settled markets contains the exact station name (e.g., "Chicago Midway, IL", "Central Park, New York"). Don't assume station mismatch without checking API metadata first.
+- **Kalshi API market status values**: `open`, `settled` work; `finalized` is the terminal state but use `settled` for the filter. `closed`, `resolved`, `ceased_trading` are NOT valid status filters.
+- **Kalshi `expiration_value`**: The resolved temperature as a string (e.g., "58.00") — useful for verifying our actual_temp matches.
+- **NWS forecast can be systematically biased cold for specific cities**: Chicago NWS forecast was -6°F cold and Miami -4°F cold consistently, even with the correct station configured. The NWS weather forecast for a gridpoint doesn't always match what the NWS CLI actually records.
+- **Ensemble dilution is real for Kalshi**: When NWS is the best source (MAE 1.0-1.4°F), the ensemble blends in worse sources and shifts the forecast 0.4-0.75°F away from NWS. For Kalshi resolution, NWS-priority weighting is essential.
+- **Probability overconfidence is platform-specific**: CDF calibrated on Polymarket (WU resolution) produces 13-69pp overconfidence when applied to Kalshi (NWS CLI resolution). Different resolution sources = different uncertainty = need platform-specific std_dev.
+- **Post-pause `would_have_won` data is the gold standard**: It shows what would happen with current parameters in real markets without risking capital. Run Q6-style queries periodically to evaluate fixes.
+- **NO side is also broken on Kalshi**: Post-pause NO bounded 40c+ showed 31% win rate at 58¢ avg ask (-27pp underwater). Don't assume fixing YES automatically fixes NO — the std_dev overconfidence misprices both sides.
+
+## PostgreSQL Date Type Parser
+- **pg OID 1082 (date) returns JS Date objects by default**: Template literals produce "Thu Feb 20 2026 00:00:00 GMT+0000" instead of "2026-02-20". Add `pg.types.setTypeParser(1082, (val) => val)` to keep YYYY-MM-DD strings. This fixes silent Map key mismatches.
+
 ---
 
 *Add new lessons as discovered from paper trading and live trading.*
