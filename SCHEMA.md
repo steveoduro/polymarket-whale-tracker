@@ -62,9 +62,14 @@ resolved_at, resolution_station, observation_high, wu_high
 | `entry_ensemble` | jsonb | Source breakdown at entry time |
 | `entry_forecast_temp` | numeric | Ensemble forecast in city's unit (°F/°C) |
 | `evaluator_log` | jsonb | Array of monitor evaluation snapshots |
-| `range_type` | text | 'bounded' or 'unbounded_upper' or 'unbounded_lower' |
+| `range_type` | text | 'bounded' or 'unbounded' (see note below) |
 | `range_unit` | text | 'F' or 'C' |
 | `platform` | text | 'polymarket' or 'kalshi' |
+
+> **range_type note**: DB stores `'bounded'` and `'unbounded'` (no `_upper`/`_lower` suffix).
+> The JS code uses `'unbounded_upper'`/`'unbounded_lower'` internally during evaluation,
+> but the platform adapter normalizes to just `'unbounded'` before storage. When querying,
+> use `range_type = 'bounded'` or `range_type = 'unbounded'`.
 
 ---
 
@@ -86,6 +91,11 @@ cal_empirical_win_rate, cal_n, cal_true_edge, cal_bucket,
 corrected_probability, correction_ratio
 ```
 
+### Backfill columns (set by resolver, not at INSERT)
+```
+actual_temp, winning_range, would_have_won, resolved_at, trade_id, model_valid
+```
+
 ### Key column notes
 | Column | Type | Notes |
 |--------|------|-------|
@@ -95,13 +105,28 @@ corrected_probability, correction_ratio
 | `ensemble_temp` | numeric | Weighted ensemble forecast temp (city's unit) |
 | `ensemble_std_dev` | numeric | Std dev used for probability calc (city's unit) |
 | `forecast_temp` | numeric | Same as ensemble_temp for Polymarket; kalshiTemp for Kalshi |
-| `action` | text | 'enter', 'log', 'reject', 'executor_blocked' |
-| `filter_reason` | text | NULL if passed; comma-separated reason codes if filtered |
+| `action` | text | 'entered', 'filtered', 'executor_blocked', 'summary', 'ghost_deleted' |
+| `filter_reason` | text | NULL if passed; semicolon-separated reason codes if filtered |
 | `kelly_fraction` | numeric | Half-Kelly sizing fraction |
 | `trade_id` | uuid | Set after executor creates trade (UPDATE) |
+| `would_have_won` | boolean | Backfilled by resolver after resolution (NULL until then) |
+| `actual_temp` | numeric | Backfilled — actual observed high for resolution |
+| `winning_range` | text | Backfilled — which range name won |
+| `model_valid` | boolean | NULL or true; used to exclude invalidated model data |
 | `would_pass_at_*` | boolean | Counterfactual: would this pass at different edge thresholds |
 | `cal_*` | various | Calibration bucket data (empirical win rate, n, true edge) |
+| `correction_ratio` | numeric | From model_calibration table (actual_win_rate / avg_model_prob) |
 | `bid_depth` / `ask_depth` | jsonb | Order book depth snapshot |
+| `range_type` | text | 'bounded' or 'unbounded' (same as trades — no suffix in DB) |
+
+### action values (verified from DB)
+| Value | Count | Meaning |
+|-------|-------|---------|
+| `filtered` | ~285k | Failed one or more filters |
+| `entered` | ~29k | Passed all filters, sent to executor |
+| `executor_blocked` | ~17k | Passed filters but executor rejected (bankroll, dup, volume) |
+| `summary` | ~2k | Aggregate summary rows |
+| `ghost_deleted` | 1 | Deleted ghost market cleanup |
 
 ### Common filter_reason values
 ```
@@ -109,6 +134,35 @@ low_edge, high_spread, spread_pct, ghost_market, no_ask_floor, no_ask_cap,
 max_model_market_ratio, min_hours, city_mae_gate, observation_boundary,
 market_divergence, platform_trading_disabled, kalshi_city_blocked,
 calBlocksEdge, high_std_range_ratio
+```
+
+---
+
+## model_calibration
+
+Correction ratios by range_type x model probability bucket. Rebuilt on each resolution cycle (TRUNCATE + INSERT). Used by scanner `_getModelCalibration()` to adjust raw model probability.
+
+### INSERT (resolver.js:627)
+```
+range_type, model_prob_bucket, n, avg_model_prob, actual_win_rate, correction_ratio
+```
+Source: aggregated from `opportunities` WHERE `side='YES'`, `would_have_won IS NOT NULL`, `hours_to_resolution BETWEEN 8 AND 60`, last 60 days.
+
+### Key column notes
+| Column | Type | Notes |
+|--------|------|-------|
+| `range_type` | text | 'bounded' or 'unbounded' |
+| `model_prob_bucket` | text | '0-5%', '5-10%', ... '70-75%', '75%+' (16 buckets, 5pp each) |
+| `n` | integer | Unique markets in bucket (must be >= 30 for scanner to use) |
+| `avg_model_prob` | numeric | Average raw model probability in bucket |
+| `actual_win_rate` | numeric | Empirical win rate (0-1) |
+| `correction_ratio` | numeric | actual_win_rate / avg_model_prob — multiply raw prob by this |
+
+### Usage in scanner (scanner.js:1271)
+```
+Lookup key: "{range_type}|{model_prob_bucket}"
+If n >= 30: corrected_probability = raw_probability * correction_ratio
+If n < 30: correction_ratio defaults to 1.0 (no correction)
 ```
 
 ---
@@ -168,6 +222,27 @@ is_active
 | `mean_error` | numeric | Average signed error (= bias) |
 | `is_active` | boolean | Whether city has enough data for active distribution |
 | `n` | integer | Number of ensemble_corrected records used |
+
+---
+
+## cli_audit
+
+NWS CLI (Climatological Report Daily) vs NWS hourly obs comparison. For Kalshi resolution verification — CLI is the authoritative source.
+
+### INSERT (resolver.js:1231)
+```
+city, station, target_date, cli_high_f, nws_obs_high_f, diff_f, cli_raw
+```
+Conflict key: `(city, target_date)`
+
+### Key column notes
+| Column | Type | Notes |
+|--------|------|-------|
+| `station` | text | ICAO station code (e.g., KNYC, KAUS) |
+| `cli_high_f` | numeric | Daily high from NWS CLI report (what Kalshi uses) |
+| `nws_obs_high_f` | numeric | Max from NWS hourly observations |
+| `diff_f` | numeric | cli_high_f - nws_obs_high_f |
+| `cli_raw` | jsonb | Raw CLI report data for debugging |
 
 ---
 
@@ -283,9 +358,10 @@ SELECT city, target_date, range_name, side, action,
   ask, filter_reason
 FROM opportunities
 WHERE created_at > NOW() - INTERVAL '1 hour'
+  AND action = 'entered'
 ORDER BY edge_pct DESC NULLS LAST;
 
--- Forecast accuracy by city
+-- Forecast accuracy by city (rolling 21-day window)
 SELECT city, unit,
   ROUND(AVG(abs_error)::numeric, 2) as mae,
   ROUND(AVG(error)::numeric, 2) as bias,
@@ -294,4 +370,25 @@ FROM v2_forecast_accuracy
 WHERE source = 'ensemble_corrected'
   AND target_date > CURRENT_DATE - INTERVAL '21 days'
 GROUP BY city, unit ORDER BY mae DESC;
+
+-- Model calibration check
+SELECT range_type, model_prob_bucket, n,
+  ROUND(avg_model_prob::numeric, 3) as model_prob,
+  ROUND(actual_win_rate::numeric, 3) as win_rate,
+  ROUND(correction_ratio::numeric, 3) as ratio
+FROM model_calibration
+WHERE n >= 30
+ORDER BY range_type, model_prob_bucket;
+
+-- Backtest: would_have_won by price bucket
+SELECT
+  CASE WHEN ask < 0.2 THEN '<20c'
+       WHEN ask < 0.3 THEN '20-30c'
+       WHEN ask < 0.4 THEN '30-40c'
+       ELSE '40c+' END as bucket,
+  side, COUNT(*) as n,
+  ROUND(AVG(CASE WHEN would_have_won THEN 1.0 ELSE 0.0 END) * 100, 1) as win_pct
+FROM opportunities
+WHERE action = 'entered' AND would_have_won IS NOT NULL
+GROUP BY 1, side ORDER BY side, bucket;
 ```
