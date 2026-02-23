@@ -151,6 +151,9 @@ const config = {
     MAX_BANKROLL_PCT: 0.15,           // 15% of matching-side bankroll per guaranteed-win trade
     REQUIRE_DUAL_CONFIRMATION: true,  // require both WU and METAR to agree
     GW_SCAN_INTERVAL_SECONDS: 90,    // independent scan timer (decoupled from observer)
+    METAR_FAST_POLL_INTERVAL_SECONDS: 90,  // fast-poll loop interval (independent from main observer)
+    METAR_ONLY_MIN_GAP_F: 2.0,            // min gap (°F) above threshold to log in fast poll
+    METAR_ONLY_MIN_GAP_C: 1.0,            // min gap (°C) above threshold to log in fast poll
   },
 
   // ── Observer ─────────────────────────────────────────────────────

@@ -34,6 +34,7 @@ class Bot {
     this.lastSnapshotAt = 0;
     this.lastObserverAt = 0;
     this.lastGWScanAt = 0;
+    this.fastPollTimer = null;
     this.running = false;
   }
 
@@ -78,6 +79,19 @@ class Bot {
 
     // Schedule subsequent cycles
     this._scheduleNextCycle();
+
+    // Start independent METAR fast poll loop (90s default)
+    if (config.guaranteed_entry?.ENABLED) {
+      const fastPollMs = (config.guaranteed_entry.METAR_FAST_POLL_INTERVAL_SECONDS || 90) * 1000;
+      this._log('info', `METAR fast poll loop: every ${fastPollMs / 1000}s`);
+      this.fastPollTimer = setInterval(async () => {
+        try {
+          await this.observer.metarFastPoll();
+        } catch (err) {
+          this._log('error', 'METAR fast poll failed', { error: err.message });
+        }
+      }, fastPollMs);
+    }
   }
 
   _scheduleNextCycle() {
@@ -260,6 +274,10 @@ class Bot {
   stop() {
     this._log('info', 'Bot stopping...');
     this.running = false;
+    if (this.fastPollTimer) {
+      clearInterval(this.fastPollTimer);
+      this.fastPollTimer = null;
+    }
   }
 }
 
