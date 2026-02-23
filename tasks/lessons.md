@@ -313,6 +313,12 @@
 ## PostgreSQL Date Type Parser
 - **pg OID 1082 (date) returns JS Date objects by default**: Template literals produce "Thu Feb 20 2026 00:00:00 GMT+0000" instead of "2026-02-20". Add `pg.types.setTypeParser(1082, (val) => val)` to keep YYYY-MM-DD strings. This fixes silent Map key mismatches.
 
+## Trade Table Modification Protocol
+- NEVER modify the trades table via ad-hoc SQL without first inserting a system_event row
+- Template: `INSERT INTO system_events (event_type, description, metadata) VALUES ('manual_backfill', '<description>', '<json>')`
+- This creates an audit trail for any manual data changes and prevents silent data corruption
+- Applies to: INSERT, UPDATE, DELETE on `trades` table outside of normal bot operation
+
 ## NaN Bankroll on Rapid PM2 Restarts (Feb 23, 2026)
 - After deploying code changes, the first 2 of 3 rapid PM2 restarts had `yesBankroll: NaN, noBankroll: NaN`
 - NaN propagated through sizing → ghost trades with `shares: null, cost: NaN` → these blocked correct entries via dedup
