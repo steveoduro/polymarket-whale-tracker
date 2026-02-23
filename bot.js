@@ -23,16 +23,17 @@ class Bot {
   constructor() {
     this.adapter = new PlatformAdapter();
     this.forecast = new ForecastEngine();
-    this.scanner = new Scanner(this.adapter, this.forecast);
     this.alerts = new Alerts();
+    this.scanner = new Scanner(this.adapter, this.forecast, this.alerts);
     this.executor = new Executor(this.adapter, this.alerts);
     this.monitor = new Monitor(this.adapter, this.forecast, this.alerts);
     this.resolver = new Resolver(this.forecast, this.alerts);
-    this.observer = new METARObserver(this.alerts);
+    this.observer = new METARObserver(this.alerts, this.adapter);
 
     this.cycleCount = 0;
     this.lastSnapshotAt = 0;
     this.lastObserverAt = 0;
+    this.lastGWScanAt = 0;
     this.running = false;
   }
 
@@ -144,7 +145,17 @@ class Bot {
     // 4. METAR Observer: poll intraday observations for all cities
     let observerRanThisCycle = false;
     try {
-      const observerIntervalMs = config.observer.POLL_INTERVAL_MINUTES * 60 * 1000;
+      // Dynamic interval: 3 min during peak hours (any city 10-18 local), 10 min otherwise
+      const peakConfig = config.observer.PEAK_HOURS || { start: 10, end: 18 };
+      const now = new Date();
+      const isPeakForAnyCity = Object.values(config.cities).some(city => {
+        const formatter = new Intl.DateTimeFormat('en-US', { timeZone: city.tz, hour: 'numeric', hour12: false });
+        const localHour = parseInt(formatter.format(now));
+        return localHour >= peakConfig.start && localHour < peakConfig.end;
+      });
+      const observerIntervalMs = (isPeakForAnyCity
+        ? (config.observer.PEAK_POLL_INTERVAL_MINUTES || 3)
+        : config.observer.POLL_INTERVAL_MINUTES) * 60 * 1000;
       if (Date.now() - this.lastObserverAt >= observerIntervalMs) {
         const obsResult = await this.observer.observe();
         this.lastObserverAt = Date.now();
@@ -157,14 +168,21 @@ class Bot {
       this._log('error', `Observer failed in cycle #${this.cycleCount}`, { error: err.message });
     }
 
-    // 4a. Guaranteed-win entries: observation-based risk-free trades
+    // 4a. Guaranteed-win entries: observation-based risk-free trades (independent 90s timer)
     try {
-      if (config.guaranteed_entry?.ENABLED && observerRanThisCycle) {
-        const gwResult = await this.scanner.scanGuaranteedWins();
-        if (gwResult.entries.length > 0) {
-          await this.alerts.guaranteedWinDetected(gwResult.entries);
-          const gwTrades = await this.executor.executeGuaranteedWins(gwResult.entries);
-          this._log('info', `Guaranteed wins: ${gwResult.entries.length} found, ${gwTrades.length} entered`);
+      if (config.guaranteed_entry?.ENABLED) {
+        const gwIntervalMs = (config.guaranteed_entry.GW_SCAN_INTERVAL_SECONDS || 90) * 1000;
+        if (Date.now() - this.lastGWScanAt >= gwIntervalMs) {
+          const gwResult = await this.scanner.scanGuaranteedWins();
+          this.lastGWScanAt = Date.now();
+          if (gwResult.entries.length > 0) {
+            await this.alerts.guaranteedWinDetected(gwResult.entries);
+            const gwTrades = await this.executor.executeGuaranteedWins(gwResult.entries);
+            this._log('info', `Guaranteed wins: ${gwResult.entries.length} found, ${gwTrades.length} entered`);
+          }
+          if (gwResult.missed?.length > 0) {
+            await this.alerts.guaranteedWinMissed(gwResult.missed);
+          }
         }
       }
     } catch (err) {

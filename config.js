@@ -147,13 +147,17 @@ const config = {
     MIN_MARGIN_CENTS: 5,              // minimum profit per share after fees (cents)
     MAX_ASK: 0.97,                    // don't buy above 97¢
     MIN_ASK: 0.30,                    // safety floor — if ask < 30¢, observation might be wrong
+    MIN_ASK_DUAL_CONFIRMED: 0.15,    // lower floor for dual-confirmed entries (both WU + METAR agree)
     MAX_BANKROLL_PCT: 0.15,           // 15% of matching-side bankroll per guaranteed-win trade
     REQUIRE_DUAL_CONFIRMATION: true,  // require both WU and METAR to agree
+    GW_SCAN_INTERVAL_SECONDS: 90,    // independent scan timer (decoupled from observer)
   },
 
   // ── Observer ─────────────────────────────────────────────────────
   observer: {
     POLL_INTERVAL_MINUTES: 10,     // how often to poll METAR observations
+    PEAK_POLL_INTERVAL_MINUTES: 3, // tighter polling during peak hours (any city in 10-18 local)
+    PEAK_HOURS: { start: 10, end: 18 },  // local time window for peak polling
     ACTIVE_HOURS: { start: 6, end: 23 },  // local time range to poll (skip overnight)
     COOLING_HOUR: 17,              // fallback default if no METAR history (5 PM)
     DYNAMIC_PEAK_HOUR: true,       // enable per-city peak hour from METAR data
