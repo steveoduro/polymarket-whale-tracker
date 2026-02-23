@@ -313,6 +313,32 @@
 ## PostgreSQL Date Type Parser
 - **pg OID 1082 (date) returns JS Date objects by default**: Template literals produce "Thu Feb 20 2026 00:00:00 GMT+0000" instead of "2026-02-20". Add `pg.types.setTypeParser(1082, (val) => val)` to keep YYYY-MM-DD strings. This fixes silent Map key mismatches.
 
+## NaN Bankroll on Rapid PM2 Restarts (Feb 23, 2026)
+- After deploying code changes, the first 2 of 3 rapid PM2 restarts had `yesBankroll: NaN, noBankroll: NaN`
+- NaN propagated through sizing → ghost trades with `shares: null, cost: NaN` → these blocked correct entries via dedup
+- Ghost trades may briefly INSERT to DB before being cleaned on next restart (dedup sees them as real positions)
+- **Lesson**: After deploying, wait for at least one full cycle to complete before restarting again. If bankrolls show NaN in logs, the cycle will produce ghost trades.
+
+## WU vs METAR Lag Patterns (Feb 23, 2026)
+- 80% of the time, WU catches METAR peak in same observation cycle (zero lag)
+- 20% of cases: WU lags by 30-60 minutes avg (worst: 90 min for Seoul)
+- WU NEVER leads METAR — it always trails or matches
+- Worst during fast-warming periods (mid-morning/early afternoon); stable when temps plateau
+- `REQUIRE_DUAL_CONFIRMATION: true` means guaranteed_win can be delayed up to 60 min during fast-warming
+- `Math.max(WU, METAR)` for `running_high` is correct — METAR always leads
+
+## calConfirmsEdge Budget Impact (Feb 23, 2026)
+- calConfirmsEdge was responsible for -$291 in losses across 22 trades from the bounded|<12h|10-15c bucket
+- `true_edge` (from `market_calibration`) = `AVG(won) - AVG(market_avg_ask)` — negative means the bucket loses money on average
+- Tightening to require `true_edge > 0` AND `(empirical_win_rate - ask) >= 3pp` effectively disables it for all current buckets
+- First bucket expected to qualify: PM|bounded|<12h|25-30c (n=43, ~1-2 weeks to n=50, 30.2% win rate)
+
+## scanGuaranteedWins Only Scans localToday (Feb 23, 2026)
+- `scanGuaranteedWins` uses `_getLocalToday(tz)` for market lookup — only fetches today's markets
+- Regular `scan()` uses `_getScanDates(tz)` which includes today + 15 days
+- If observation data from today exceeds a range for tomorrow's market, guaranteed_win won't fire
+- Design limitation, not a bug — tomorrow's observation data doesn't exist yet
+
 ---
 
 *Add new lessons as discovered from paper trading and live trading.*
