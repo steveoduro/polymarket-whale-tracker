@@ -162,6 +162,7 @@ class Bot {
       if (config.guaranteed_entry?.ENABLED && observerRanThisCycle) {
         const gwResult = await this.scanner.scanGuaranteedWins();
         if (gwResult.entries.length > 0) {
+          await this.alerts.guaranteedWinDetected(gwResult.entries);
           const gwTrades = await this.executor.executeGuaranteedWins(gwResult.entries);
           this._log('info', `Guaranteed wins: ${gwResult.entries.length} found, ${gwTrades.length} entered`);
         }
