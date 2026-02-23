@@ -165,6 +165,9 @@ const config = {
     PEAK_HOUR_MIN: 14,             // floor clamp (2 PM — no city peaks before this)
     PEAK_HOUR_MAX: 20,             // ceiling clamp (8 PM — safety upper bound)
     PEAK_HOUR_MIN_SAMPLES: 3,      // minimum peak observations before trusting dynamic value
+    WU_LEAD_MIN_GAP_F: 2.5,        // minimum WU-METAR gap in °F to log as WU-leads event
+    WU_LEAD_MIN_GAP_C: 1.5,        // minimum WU-METAR gap in °C to log as WU-leads event
+    WU_LEAD_MAX_LOCAL_HOUR: 12,     // only check WU-leads during morning hours (before noon)
   },
 
   // ── Observation Entry Gate ──────────────────────────────────────

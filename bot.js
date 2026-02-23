@@ -144,6 +144,7 @@ class Bot {
 
     // 4. METAR Observer: poll intraday observations for all cities
     let observerRanThisCycle = false;
+    let observerNewHighs = 0;
     try {
       // Dynamic interval: 3 min during peak hours (any city 10-18 local), 10 min otherwise
       const peakConfig = config.observer.PEAK_HOURS || { start: 10, end: 18 };
@@ -160,12 +161,33 @@ class Bot {
         const obsResult = await this.observer.observe();
         this.lastObserverAt = Date.now();
         observerRanThisCycle = true;
+        observerNewHighs = obsResult.newHighs || 0;
         if (obsResult.citiesPolled > 0) {
           this._log('info', `Observer: ${obsResult.citiesPolled} cities polled, ${obsResult.newHighs} new highs`);
         }
       }
     } catch (err) {
       this._log('error', `Observer failed in cycle #${this.cycleCount}`, { error: err.message });
+    }
+
+    // 4a-event. Event-driven GW scan — fires immediately when observer finds new highs
+    try {
+      if (observerNewHighs > 0 && config.guaranteed_entry?.ENABLED) {
+        this._log('info', `Observer found ${observerNewHighs} new highs — triggering immediate GW scan`);
+        const gwResult = await this.scanner.scanGuaranteedWins();
+        if (gwResult.entries.length > 0) {
+          await this.alerts.guaranteedWinDetected(gwResult.entries);
+          const gwTrades = await this.executor.executeGuaranteedWins(gwResult.entries);
+          this._log('info', `Event-driven GW: ${gwResult.entries.length} found, ${gwTrades.length} entered`);
+        }
+        if (gwResult.missed?.length > 0) {
+          await this.alerts.guaranteedWinMissed(gwResult.missed);
+        }
+        // Reset timer so we don't double-scan shortly after
+        this.lastGWScanAt = Date.now();
+      }
+    } catch (err) {
+      this._log('error', 'Event-driven GW scan failed', { error: err.message });
     }
 
     // 4a. Guaranteed-win entries: observation-based risk-free trades (independent 90s timer)
