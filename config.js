@@ -149,11 +149,12 @@ const config = {
     MIN_ASK: 0.30,                    // safety floor — if ask < 30¢, observation might be wrong
     MIN_ASK_DUAL_CONFIRMED: 0.15,    // lower floor for dual-confirmed entries (both WU + METAR agree)
     MAX_BANKROLL_PCT: 0.15,           // 15% of matching-side bankroll per guaranteed-win trade
-    REQUIRE_DUAL_CONFIRMATION: true,  // require both WU and METAR to agree
+    REQUIRE_DUAL_CONFIRMATION: false, // METAR-first mode: METAR triggers, WU optional confirmation
     GW_SCAN_INTERVAL_SECONDS: 90,    // independent scan timer (decoupled from observer)
     METAR_FAST_POLL_INTERVAL_SECONDS: 90,  // fast-poll loop interval (independent from main observer)
-    METAR_ONLY_MIN_GAP_F: 2.0,            // min gap (°F) above threshold to log in fast poll
-    METAR_ONLY_MIN_GAP_C: 1.0,            // min gap (°C) above threshold to log in fast poll
+    METAR_ONLY_MIN_GAP_F: 1.0,            // min gap (°F) above threshold for METAR-only entry
+    METAR_ONLY_MIN_GAP_C: 0.5,            // min gap (°C) above threshold for METAR-only entry
+    GW_METAR_BANKROLL: 200,               // isolated bankroll for METAR-only (dual_confirmed=false) entries
   },
 
   // ── Observer ─────────────────────────────────────────────────────
