@@ -124,13 +124,15 @@ const config = {
   platforms: {
     polymarket: {
       enabled: true,
+      guaranteedWinEnabled: true,             // METAR guaranteed wins — on
       feeRate: 0,                             // Weather markets: zero trading fees (3.15% only applies to 15-min crypto)
       gammaUrl: 'https://gamma-api.polymarket.com',
       clobUrl: 'https://clob.polymarket.com',
     },
     kalshi: {
       enabled: true,                                // keep true — scanner still logs for calibration
-      tradingEnabled: false,                        // NEW: blocks new entries, keeps scanning + logging
+      tradingEnabled: false,                        // edge-based trades — still off
+      guaranteedWinEnabled: true,                   // METAR guaranteed wins — on
       feeRate: 0,                             // Legacy flat rate (unused) — see takerFeeMultiplier
       takerFeeMultiplier: 0.07,               // Actual fee: 0.07 * P * (1-P) per contract, charged at entry only
       apiUrl: 'https://api.elections.kalshi.com/trade-api/v2',
