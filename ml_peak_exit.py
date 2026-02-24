@@ -53,25 +53,15 @@ def parse_evaluator_log(log_json):
     return entries
 
 def compute_window_duration(log_entries, threshold):
-    """Compute how many minutes the bid stayed above threshold."""
+    """Compute total span (first to last) in minutes where bid was above threshold."""
     if not log_entries:
         return 0
     above_entries = [e for e in log_entries if e['bid'] >= threshold]
     if not above_entries:
         return 0
-    # Find contiguous or total time above threshold
-    total_minutes = 0
-    for i, e in enumerate(above_entries):
-        if i == 0:
-            continue
-        delta = (above_entries[i]['ts'] - above_entries[i-1]['ts']).total_seconds() / 60
-        # Only count if gap < 30 min (otherwise it's a scan gap)
-        if delta < 30:
-            total_minutes += delta
-    # If only 1 entry above, estimate from scan interval (~5 min)
-    if len(above_entries) == 1:
-        total_minutes = 5
-    return total_minutes
+    first_ts = above_entries[0]['ts']
+    last_ts = above_entries[-1]['ts']
+    return (last_ts - first_ts).total_seconds() / 60
 
 def main():
     print("=" * 70)
