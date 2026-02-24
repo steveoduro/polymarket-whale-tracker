@@ -1,8 +1,30 @@
 # Recent Changes Log
 
-Last updated: 2026-02-24
+Last updated: 2026-02-24 22:43 UTC
 
 ## Commits
+
+### a1761d7 — Kalshi gap check always applies regardless of dual confirmation
+**Date:** 2026-02-24
+
+WU and METAR both read KLGA-area temps for NYC, so dual confirmation from the same geographic location doesn't reduce the KLGA-to-KNYC divergence risk. The 1.5F Kalshi gap buffer was wrapped inside `if (!dualConfirmed)` — when both sources agreed (they always will, same station), the gap check was skipped entirely.
+
+Changes:
+- `scanner.js`: Changed `if (!dualConfirmed)` to `if (!dualConfirmed || isKalshi)` so the Kalshi min gap always runs
+- `scanner.js`: Added `_missedAlerted` Set for daily debounce — `scanGuaranteedWins()` filters missed array before returning, preventing repeated Telegram alerts for the same missed entries
+
+Background: NYC trade on Feb 24 — KLGA hit 32F, gap was only 0.5F above threshold. Central Park (KNYC) stayed at 30-31F. Only saved from a bad entry because ask was already below MIN_ASK.
+
+---
+
+### Bulk backfill of 228K unresolved opportunities
+**Date:** 2026-02-24 (manual SQL, no code change)
+
+The resolver was processing only 200 opps/cycle via individual API calls. Backlog of 228,475 unresolved opportunities (from Feb 20 probability fix) would have taken ~95 hours to drain. Bulk SQL UPDATE joining `v2_forecast_accuracy` resolved 220,664 rows instantly. Remaining 7,611 (Seoul/Wellington Feb 20-21 missing from accuracy table) backfilled from `metar_observations` running highs.
+
+Result: Cycle time dropped from 121-160s to ~100s. Calibration tables (`market_calibration`, `model_calibration`) rebuilt with full dataset on next cycle.
+
+---
 
 ### e0f64c0 — Fast poll triggers immediate GW execution on detection
 **Date:** 2026-02-24
