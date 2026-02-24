@@ -28,7 +28,7 @@ class Bot {
     this.executor = new Executor(this.adapter, this.alerts);
     this.monitor = new Monitor(this.adapter, this.forecast, this.alerts);
     this.resolver = new Resolver(this.forecast, this.alerts);
-    this.observer = new METARObserver(this.alerts, this.adapter);
+    this.observer = new METARObserver(this.alerts, this.adapter, this.scanner, this.executor);
 
     this.cycleCount = 0;
     this.lastSnapshotAt = 0;
@@ -207,17 +207,24 @@ class Bot {
     // 4a. Guaranteed-win entries: observation-based risk-free trades (independent 90s timer)
     try {
       if (config.guaranteed_entry?.ENABLED) {
-        const gwIntervalMs = (config.guaranteed_entry.GW_SCAN_INTERVAL_SECONDS || 90) * 1000;
-        if (Date.now() - this.lastGWScanAt >= gwIntervalMs) {
-          const gwResult = await this.scanner.scanGuaranteedWins();
+        // Skip if fast poll already triggered a GW scan in the last 30 seconds
+        const fastPollScanAge = Date.now() - (this.observer._lastFastPollGWScanAt || 0);
+        if (fastPollScanAge < 30000) {
+          this._log('info', `GW scan skipped — fast poll ran ${Math.round(fastPollScanAge / 1000)}s ago`);
           this.lastGWScanAt = Date.now();
-          if (gwResult.entries.length > 0) {
-            await this.alerts.guaranteedWinDetected(gwResult.entries);
-            const gwTrades = await this.executor.executeGuaranteedWins(gwResult.entries);
-            this._log('info', `Guaranteed wins: ${gwResult.entries.length} found, ${gwTrades.length} entered`);
-          }
-          if (gwResult.missed?.length > 0) {
-            await this.alerts.guaranteedWinMissed(gwResult.missed);
+        } else {
+          const gwIntervalMs = (config.guaranteed_entry.GW_SCAN_INTERVAL_SECONDS || 90) * 1000;
+          if (Date.now() - this.lastGWScanAt >= gwIntervalMs) {
+            const gwResult = await this.scanner.scanGuaranteedWins();
+            this.lastGWScanAt = Date.now();
+            if (gwResult.entries.length > 0) {
+              await this.alerts.guaranteedWinDetected(gwResult.entries);
+              const gwTrades = await this.executor.executeGuaranteedWins(gwResult.entries);
+              this._log('info', `Guaranteed wins: ${gwResult.entries.length} found, ${gwTrades.length} entered`);
+            }
+            if (gwResult.missed?.length > 0) {
+              await this.alerts.guaranteedWinMissed(gwResult.missed);
+            }
           }
         }
       }
