@@ -151,7 +151,7 @@ const config = {
     MAX_BANKROLL_PCT: 0.15,           // 15% of matching-side bankroll per guaranteed-win trade
     REQUIRE_DUAL_CONFIRMATION: false, // METAR-first mode: METAR triggers, WU optional confirmation
     GW_SCAN_INTERVAL_SECONDS: 90,    // independent scan timer (decoupled from observer)
-    METAR_FAST_POLL_INTERVAL_SECONDS: 90,  // fast-poll loop interval (independent from main observer)
+    METAR_FAST_POLL_INTERVAL_SECONDS: 20,  // fast-poll loop interval (independent from main observer)
     METAR_ONLY_MIN_GAP_F: 1.0,            // min gap (°F) above threshold for METAR-only entry
     METAR_ONLY_MIN_GAP_C: 0.5,            // min gap (°C) above threshold for METAR-only entry
     GW_METAR_BANKROLL: 200,               // isolated bankroll for METAR-only (dual_confirmed=false) entries
