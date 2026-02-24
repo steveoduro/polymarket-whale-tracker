@@ -154,8 +154,10 @@ const config = {
     REQUIRE_DUAL_CONFIRMATION: false, // METAR-first mode: METAR triggers, WU optional confirmation
     GW_SCAN_INTERVAL_SECONDS: 90,    // independent scan timer (decoupled from observer)
     METAR_FAST_POLL_INTERVAL_SECONDS: 5,   // fast-poll loop interval (batch HTTP + batch DB ≈ 2.7s)
-    METAR_ONLY_MIN_GAP_F: 0.5,            // min gap (°F) above threshold for METAR-only entry
-    METAR_ONLY_MIN_GAP_C: 0.5,            // min gap (°C) above threshold for METAR-only entry
+    METAR_ONLY_MIN_GAP_F: 0.5,            // min gap (°F) above threshold for METAR-only entry (Polymarket)
+    METAR_ONLY_MIN_GAP_C: 0.5,            // min gap (°C) above threshold for METAR-only entry (Polymarket)
+    METAR_ONLY_MIN_GAP_F_KALSHI: 1.5,     // Kalshi resolves via NWS CLI — needs larger buffer for station divergence
+    METAR_ONLY_MIN_GAP_C_KALSHI: 0.8,     // Kalshi resolves via NWS CLI — needs larger buffer for station divergence
     GW_METAR_BANKROLL: 200,               // isolated bankroll for METAR-only (dual_confirmed=false) entries
   },
 
