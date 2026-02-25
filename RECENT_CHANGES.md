@@ -1,8 +1,20 @@
 # Recent Changes Log
 
-Last updated: 2026-02-24 22:43 UTC
+Last updated: 2026-02-25 00:15 UTC
 
 ## Commits
+
+### Fix missed-alert debounce resetting at UTC midnight
+**Date:** 2026-02-25
+
+The `_missedAlerted` debounce Set was resetting at midnight UTC based on `new Date().toISOString()`. American cities are still on the previous local date for 5-8 hours after that boundary, so the same missed entry (NYC Kalshi 30-31° NO) re-triggered a Telegram alert at 7:03 PM EST (00:03 UTC).
+
+Changes:
+- `scanner.js`: Replaced UTC-date-based Set reset with 2-day TTL pruning — entries stay until `target_date` is 2+ days old
+- `scanner.js`: Changed debounce key delimiter from `_` to `|` to avoid ambiguity with city names containing underscores (e.g. `los_angeles`)
+- Removed unused `_missedAlertedDate` field
+
+---
 
 ### a1761d7 — Kalshi gap check always applies regardless of dual confirmation
 **Date:** 2026-02-24
@@ -46,78 +58,23 @@ Expected: detection-to-execution drops from ~4.5min to <15s.
 
 NYC uses KLGA for Polymarket but KNYC for Kalshi resolution. Fast poll now maps each platform to its correct station and evaluates ranges against station-specific METAR temps.
 
-Changes:
-- `stationsByPlatform` replaces single station per city
-- Running high query keyed by `city|date|station` (not `city|date`)
-- Station groups invert the map: station -> platforms for processing
-- `_processRangesForCity` gains `platformFilter` + `detection_station` params
-- `detection_station` column added to `metar_pending_events`
-
 ---
 
-### 19c9a07 — Fix _bothCrossThreshold always-true bug, add Kalshi min gap
-**Date:** 2026-02-24
-
-Fixed guaranteed-win entry logic where dual confirmation was always passing. Added platform-aware minimum gap (Kalshi needs wider buffer due to NWS CLI vs METAR divergence).
-
----
-
-### 02c4c1b — Lower fast poll interval from 20s to 5s
-**Date:** 2026-02-24
-
-Reduced `METAR_FAST_POLL_INTERVAL_SECONDS` from 20 to 5 for faster boundary crossing detection.
-
----
-
-### 8c9ffeb — Batch DB queries in fast poll
-**Date:** 2026-02-24
-
-Replaced per-city DB queries with batch queries using `DISTINCT ON` and `ANY($1)`. Reduced from ~42 queries per poll to 2.
-
----
-
-## Post-Deployment Logs (2026-02-24 22:01 UTC)
+## Post-Deployment Logs (2026-02-25 00:15 UTC)
 
 ```
-Cycle #1 complete in 160.5s
-  marketsScanned: 38
-  logged: 455
+Cycle #2 complete in 86.4s
+  marketsScanned: 37
+  logged: 426
   approved: 0
-  filtered: 455
+  filtered: 426
   tradesEntered: 0
   monitored: 3
   exits: 0
   resolved: 0
-  backfilled: 200
+  backfilled: 0
 
-Observer: 22 cities polled, 1 new highs
-Observer found 1 new highs — triggering immediate GW scan
-Guaranteed-win scan: 1 missed entries (below_min_ask)
+Observer: 21 cities polled, 0 new highs
+Guaranteed-win scan: 1 missed entries (0 new) {"reasons":["below_metar_gap"]}
 METAR fast poll loop: every 5s
-Snapshots captured: 38
-
-Source rankings (sample):
-  nyc: openmeteo(1.43) > nws(1.5) > mos(1.92 DEMOTED) > ecmwf(2.56) > weatherapi(2.62 DEMOTED)
-  chicago: openmeteo(2.35) > weatherapi(2.88) > mos(3 DEMOTED) > nws(3.36) > ecmwf(4.37 DEMOTED)
-  miami: openmeteo(0.73) > nws(0.96) > mos(1.2 DEMOTED) > ecmwf(1.5 DEMOTED) > weatherapi(2.78 DEMOTED)
-  london: ecmwf(0.36) > ukmo(0.52) > weatherapi(0.6) > openmeteo(0.67 DEMOTED)
-
-City gates:
-  seoul: fully eligible (MAE 0.77C, n=11)
-  toronto: fully eligible (MAE 0.75C, n=13)
-  nyc: unbounded-only (MAE 1.81F > 1.8 bounded threshold, n=13)
-  chicago: BLOCKED (MAE 3.83F > 2.7 threshold, n=13)
-  atlanta: fully eligible (MAE 1.65F, n=13)
-  dallas: fully eligible (MAE 1.28F, n=13)
-  seattle: fully eligible (MAE 1.21F, n=13)
-  denver: BLOCKED (MAE 6.51F > 2.7 threshold, n=13)
-  austin: BLOCKED (MAE 4.25F > 2.7 threshold, n=13)
-  los angeles: unbounded-only (MAE 2.28F > 1.8 bounded threshold, n=13)
-  miami: fully eligible (MAE 1.16F, n=13)
-  london: fully eligible (MAE 0.53C, n=13)
-  ankara: fully eligible (MAE 0.85C, n=13)
-
-Model calibration (last 7 days):
-  residual std dev: F=6.67 (n=337), C=1.49 (n=170)
-  calibration: 0-10% -> 0.7% win rate (n=852), 10-25% -> 5% (n=876)
 ```
