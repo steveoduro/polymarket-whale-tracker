@@ -80,15 +80,20 @@ class Bot {
     // Schedule subsequent cycles
     this._scheduleNextCycle();
 
-    // Start independent METAR fast poll loop (90s default)
+    // Start independent METAR fast poll loop
     if (config.guaranteed_entry?.ENABLED) {
       const fastPollMs = (config.guaranteed_entry.METAR_FAST_POLL_INTERVAL_SECONDS || 90) * 1000;
       this._log('info', `METAR fast poll loop: every ${fastPollMs / 1000}s`);
+      this._fastPollRunning = false;
       this.fastPollTimer = setInterval(async () => {
+        if (this._fastPollRunning) return; // prevent overlapping polls
+        this._fastPollRunning = true;
         try {
           await this.observer.metarFastPoll();
         } catch (err) {
           this._log('error', 'METAR fast poll failed', { error: err.message });
+        } finally {
+          this._fastPollRunning = false;
         }
       }, fastPollMs);
     }
