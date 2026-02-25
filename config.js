@@ -160,8 +160,6 @@ const config = {
     METAR_FAST_POLL_INTERVAL_SECONDS: 5,   // fast-poll loop interval (batch HTTP + batch DB ≈ 2.7s)
     METAR_ONLY_MIN_GAP_F: 0.5,            // min gap (°F) above threshold for METAR-only entry (Polymarket)
     METAR_ONLY_MIN_GAP_C: 0.5,            // min gap (°C) above threshold for METAR-only entry (Polymarket)
-    METAR_ONLY_MIN_GAP_F_KALSHI: 1.5,     // Kalshi resolves via NWS CLI — needs larger buffer for station divergence
-    METAR_ONLY_MIN_GAP_C_KALSHI: 0.8,     // Kalshi resolves via NWS CLI — needs larger buffer for station divergence
     GW_LIVE_ENABLED: false,                 // kill switch — flip to true when ready to go live
     GW_METAR_BANKROLL: 10,                  // live pool ($10 test)
     GW_PAPER_BANKROLL: 1000,                // paper simulation continues at $1000
