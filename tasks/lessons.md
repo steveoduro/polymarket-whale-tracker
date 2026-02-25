@@ -345,6 +345,20 @@
 - If observation data from today exceeds a range for tomorrow's market, guaranteed_win won't fire
 - Design limitation, not a bug — tomorrow's observation data doesn't exist yet
 
+## No Free Real-Time METAR WebSocket Exists (Feb 24, 2026)
+- IEMBot (`wss://iembot.dev/iem`) only routes NWS warning products (SVR, TOR, FFW etc.), NOT routine METAR observations
+- IEMBot requires `User-Agent` header (returns 400 without it)
+- IEMBot channels are WFO chat rooms (e.g., `ffcchat`, `okxchat`), NOT `METAR.ICAO` format
+- Real-time METAR distribution via WebSocket requires paid subscriptions (NOAA NOAAPort, commercial feeds)
+- aviationweather.gov accepts comma-separated station IDs in a single request — batch polling is the best free option
+- At 5s poll interval with batch HTTP + batch DB, effective detection latency is <5s (sufficient for guaranteed-win use case)
+
+## Fast Poll Station Selection Must Be Platform-Aware (Feb 24, 2026)
+- `metarFastPoll()` currently picks ONE station per city (`polymarketStation || nwsStation`)
+- For NYC: picks KLGA (Polymarket) but Kalshi ranges need KNYC — checking wrong station
+- Fix: fetch both stations in batch, route each station's temp to correct platform's ranges
+- Only NYC affected today (Chicago has `kalshiBlocked: true`), but future-proof for unblocking
+
 ---
 
 *Add new lessons as discovered from paper trading and live trading.*
