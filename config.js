@@ -150,7 +150,7 @@ const config = {
     MAX_ASK: 0.97,                    // don't buy above 97¢
     MIN_ASK: 0.30,                    // safety floor — if ask < 30¢, observation might be wrong
     MIN_ASK_DUAL_CONFIRMED: 0.15,    // lower floor for dual-confirmed entries (both WU + METAR agree)
-    MAX_BANKROLL_PCT: 0.15,           // 15% of matching-side bankroll per guaranteed-win trade
+    MAX_BANKROLL_PCT: 0.20,           // 20% of matching-side bankroll per guaranteed-win trade
     REQUIRE_DUAL_CONFIRMATION: false, // METAR-first mode: METAR triggers, WU optional confirmation
     GW_SCAN_INTERVAL_SECONDS: 90,    // independent scan timer (decoupled from observer)
     METAR_FAST_POLL_INTERVAL_SECONDS: 5,   // fast-poll loop interval (batch HTTP + batch DB ≈ 2.7s)
@@ -158,7 +158,7 @@ const config = {
     METAR_ONLY_MIN_GAP_C: 0.5,            // min gap (°C) above threshold for METAR-only entry (Polymarket)
     METAR_ONLY_MIN_GAP_F_KALSHI: 1.5,     // Kalshi resolves via NWS CLI — needs larger buffer for station divergence
     METAR_ONLY_MIN_GAP_C_KALSHI: 0.8,     // Kalshi resolves via NWS CLI — needs larger buffer for station divergence
-    GW_METAR_BANKROLL: 200,               // isolated bankroll for METAR-only (dual_confirmed=false) entries
+    GW_METAR_BANKROLL: 1000,              // isolated bankroll for METAR-only (dual_confirmed=false) entries
   },
 
   // ── Observer ─────────────────────────────────────────────────────
