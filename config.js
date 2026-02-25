@@ -218,6 +218,8 @@ const config = {
     'buenos aires': { lat: -34.6037, lon: -58.3816, tz: 'America/Argentina/Buenos_Aires', unit: 'C', polymarketStation: 'SAEZ', wuCountry: 'AR' },
     ankara:        { lat: 39.9334, lon: 32.8597, tz: 'Europe/Istanbul',        unit: 'C', polymarketStation: 'LTAC', wuCountry: 'TR' },
     wellington:    { lat: -41.2865, lon: 174.7762, tz: 'Pacific/Auckland',     unit: 'C', polymarketStation: 'NZWN', wuCountry: 'NZ' },
+    paris:         { lat: 48.8566, lon: 2.3522, tz: 'Europe/Paris',          unit: 'C', polymarketStation: 'LFPG', wuCountry: 'FR' },
+    'sao paulo':   { lat: -23.5505, lon: -46.6333, tz: 'America/Sao_Paulo',  unit: 'C', polymarketStation: 'SBGR', wuCountry: 'BR' },
   },
 
 };
