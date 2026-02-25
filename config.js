@@ -128,6 +128,10 @@ const config = {
       feeRate: 0,                             // Weather markets: zero trading fees (3.15% only applies to 15-min crypto)
       gammaUrl: 'https://gamma-api.polymarket.com',
       clobUrl: 'https://clob.polymarket.com',
+      apiKey: process.env.POLY_API_KEY,
+      apiSecret: process.env.POLY_API_SECRET,
+      apiPassphrase: process.env.POLY_API_PASSPHRASE,
+      funderAddress: process.env.POLY_FUNDER_ADDRESS,  // proxy wallet (0xFCa1...)
     },
     kalshi: {
       enabled: true,                                // keep true — scanner still logs for calibration
@@ -158,7 +162,9 @@ const config = {
     METAR_ONLY_MIN_GAP_C: 0.5,            // min gap (°C) above threshold for METAR-only entry (Polymarket)
     METAR_ONLY_MIN_GAP_F_KALSHI: 1.5,     // Kalshi resolves via NWS CLI — needs larger buffer for station divergence
     METAR_ONLY_MIN_GAP_C_KALSHI: 0.8,     // Kalshi resolves via NWS CLI — needs larger buffer for station divergence
-    GW_METAR_BANKROLL: 1000,              // isolated bankroll for METAR-only (dual_confirmed=false) entries
+    GW_LIVE_ENABLED: true,                  // enable live trading for GW on Polymarket
+    GW_METAR_BANKROLL: 10,                  // live pool ($10 test)
+    GW_PAPER_BANKROLL: 1000,                // paper simulation continues at $1000
   },
 
   // ── Observer ─────────────────────────────────────────────────────

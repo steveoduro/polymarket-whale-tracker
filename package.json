@@ -8,8 +8,9 @@
     "dev": "node --watch bot.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0",
+    "@polymarket/clob-client": "^4.22.8",
     "dotenv": "^16.3.1",
+    "ethers": "^5.8.0",
     "node-fetch": "^3.3.2",
     "pg": "^8.18.0"
   },
