@@ -218,6 +218,9 @@ const config = {
     wellington:    { lat: -41.2865, lon: 174.7762, tz: 'Pacific/Auckland',     unit: 'C', polymarketStation: 'NZWN', wuCountry: 'NZ' },
     paris:         { lat: 48.8566, lon: 2.3522, tz: 'Europe/Paris',          unit: 'C', polymarketStation: 'LFPG', wuCountry: 'FR' },
     'sao paulo':   { lat: -23.5505, lon: -46.6333, tz: 'America/Sao_Paulo',  unit: 'C', polymarketStation: 'SBGR', wuCountry: 'BR' },
+    'san antonio': { lat: 29.4241, lon: -98.4936, tz: 'America/Chicago',      unit: 'F', nwsStation: 'KSAT', wuCountry: 'US' },
+    minneapolis:   { lat: 44.9778, lon: -93.2650, tz: 'America/Chicago',      unit: 'F', nwsStation: 'KMSP', wuCountry: 'US' },
+    'oklahoma city': { lat: 35.4676, lon: -97.5164, tz: 'America/Chicago',    unit: 'F', nwsStation: 'KOKC', wuCountry: 'US' },
   },
 
 };
