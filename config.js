@@ -160,6 +160,8 @@ const config = {
     METAR_FAST_POLL_INTERVAL_SECONDS: 15,   // fast-poll loop interval (batch poll takes 10-18s with 28 cities)
     METAR_ONLY_MIN_GAP_F: 0.5,            // min gap (°F) above threshold for METAR-only entry (Polymarket)
     METAR_ONLY_MIN_GAP_C: 0.5,            // min gap (°C) above threshold for METAR-only entry (Polymarket)
+    GW_NEAR_THRESHOLD_BUFFER_F: 1.0,      // fast poll: only process cities within this buffer of a GW boundary (°F)
+    GW_NEAR_THRESHOLD_BUFFER_C: 0.5,      // fast poll: only process cities within this buffer of a GW boundary (°C)
     GW_LIVE_ENABLED: false,                 // kill switch — flip to true when ready to go live
     GW_METAR_BANKROLL: 10,                  // live pool ($10 test)
     GW_PAPER_BANKROLL: 1000,                // paper simulation continues at $1000
@@ -177,9 +179,9 @@ const config = {
     PEAK_HOUR_MIN: 14,             // floor clamp (2 PM — no city peaks before this)
     PEAK_HOUR_MAX: 20,             // ceiling clamp (8 PM — safety upper bound)
     PEAK_HOUR_MIN_SAMPLES: 3,      // minimum peak observations before trusting dynamic value
-    WU_LEAD_MIN_GAP_F: 2.5,        // minimum WU-METAR gap in °F to log as WU-leads event
-    WU_LEAD_MIN_GAP_C: 1.5,        // minimum WU-METAR gap in °C to log as WU-leads event
-    WU_LEAD_MAX_LOCAL_HOUR: 12,     // only check WU-leads during morning hours (before noon)
+    WU_LEAD_MIN_GAP_F: 1.0,        // minimum WU-METAR gap in °F to log as WU-leads event (was 2.5 — only 1/29 exceeded)
+    WU_LEAD_MIN_GAP_C: 0.5,        // minimum WU-METAR gap in °C to log as WU-leads event (was 1.5)
+    WU_LEAD_MAX_LOCAL_HOUR: 14,     // check WU-leads through 2pm (was 12 — captures 12-2pm rising phase)
   },
 
   // ── Observation Entry Gate ──────────────────────────────────────
