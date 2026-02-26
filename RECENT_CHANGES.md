@@ -1,16 +1,51 @@
 # Recent Changes Log
 
-Last updated: 2026-02-26 16:35 UTC
+Last updated: 2026-02-26 21:45 UTC
 
 ## Commits
 
-### (pending) — fix: _checkWULeads queryOne destructuring bug
+### (pending) — fix: GW pipeline — allow multiple NOs, fix Kalshi missed alerts, platform-aware dedup
+**Date:** 2026-02-26
+
+**Fix 1 — Allow multiple NO trades per GW city/date:**
+- Scanner: removed `_openNoKeys` mutual exclusivity check for GW NOs
+- Scanner: dedup key for NOs now includes `range_name` (keeps all qualifying NO ranges, not just best margin)
+- Executor: removed NO mutual exclusivity check (multiple NOs can all win when temp exceeds multiple boundaries)
+
+**Fix 2 — Fix Kalshi GW missed alerts not appearing on Telegram:**
+- Root cause: scanner line 854 had `ask >= 1` → silent continue, dropping entries before `missed[]` logic
+- Fix: removed `ask >= 1` guard, entries now flow to MAX_ASK filter which adds to `missed[]`
+- Added `ask < 1.0` check in above_max_ask path — fully repriced $1 markets are noise, only near-misses alert
+- Result: 85 → 2 missed entries (only actionable below_min_ask), Kalshi GW now visible on Telegram
+
+**Fix 3 — Platform-aware mutual exclusivity (cross-platform blocking bug):**
+- `_openYesKeys` and `_openNoKeys` now include platform in key
+- Previously: Polymarket YES trade on NYC blocked Kalshi YES on NYC (wrong — independent platforms)
+- Executor: YES mutual exclusivity query now includes `platform = $4` filter
+- Regular scan paths updated to use platform-aware keys
+
+Files: `lib/scanner.js`, `lib/executor.js`
+
+---
+
+### ebfd735 — fix: _checkWULeads queryOne destructuring bug
 **Date:** 2026-02-26
 
 - `_checkWULeads()` used `const existingRow = await queryOne(...)` — queryOne returns `{data, error}` wrapper, always truthy
 - This caused every poll to enter the "existing row" branch, never reaching the INSERT path
 - Result: wu_leads_events table was permanently empty despite correct thresholds
 - Fix: `const { data: existingRow } = await queryOne(...)`
+
+Files: `lib/metar-observer.js`
+
+---
+
+### f027fd6 — fix: call _checkWULeads from fast poll where METAR-only values are available
+**Date:** 2026-02-26
+
+- Self-defeating write order: fast poll writes `running_high = max(wu, metar)` to DB, then observe() reads it back and `_checkWULeads` sees gap=0
+- Fix: call `_checkWULeads` from the fast poll's `hasWUEnhancement` block where METAR-only effHigh values are still available
+- Manually backfilled 2 wu_leads_events: Wellington (gap=2°C) and NYC (gap=2°F)
 
 Files: `lib/metar-observer.js`
 
@@ -57,33 +92,13 @@ Files: `config.js`, `lib/wu-scraper.js`, `lib/metar-observer.js`
 
 ---
 
-### 1fe5a76 — Fast poll 5s→15s + overlap guard
-**Date:** 2026-02-26
-
-- `METAR_FAST_POLL_INTERVAL_SECONDS: 5` → `15` (28 cities at 5s caused overlapping polls)
-- Added `_fastPollRunning` mutex in bot.js to prevent concurrent fast polls
-- Result: clean non-overlapping polls, ~5-12s typical duration
-
----
-
-### fb4bb08 — Kalshi city expansion, dead ticker cleanup, stale platform alerts
-**Date:** 2026-02-25
-
-- **11 stale Kalshi tickers fixed**: Kalshi migrated from KXHIGH→KXHIGHT prefix
-- **6 dead international KALSHI_SERIES removed**: toronto, buenos aires, ankara, wellington, london, seoul
-- **3 new Kalshi cities**: san antonio, minneapolis, oklahoma city
-- **Stale platform alert**: scanner tracks consecutive cycles with 0 markets per city/platform
-
----
-
-## Post-Deployment Logs (2026-02-26 16:35 UTC)
+## Post-Deployment Logs (2026-02-26 21:45 UTC)
 
 ```
-Bot restarted at 16:32 UTC, clean startup, cycle #1 complete in 190.9s
-Scanner: 68 markets scanned, 835 logged, 0 approved
-Monitor: 2 open positions
-Fast poll WU: 11/11 responses (nyc, chicago, miami, atlanta, seattle, london, toronto, buenos aires, ankara, paris, sao paulo)
-GW scan: 1 missed entry (above_max_ask)
-
-wu_leads_events: 0 rows (queryOne bug just fixed — METAR currently leads WU in all cities, WU-leads pattern fires when WU peaks before METAR during 12-2pm rising phase)
+Bot restarted at 21:42 UTC, clean startup, cycle #1 complete in 174.0s
+Scanner: 67 markets scanned, 756 logged, 0 approved
+Monitor: 9 open positions
+Fast poll WU: 13/13 responses (all near-threshold cities)
+GW scan: 2 missed entries (below_min_ask) — Kalshi $1 markets now filtered silently
+WU fast poll: NYC METAR=45°F, WU=47°F (enhancement active)
 ```
