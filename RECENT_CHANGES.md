@@ -1,10 +1,35 @@
 # Recent Changes Log
 
-Last updated: 2026-02-26 02:50 UTC
+Last updated: 2026-02-26 16:35 UTC
 
 ## Commits
 
-### (pending) — WU fast poll integration + wu_leads fix + tiering
+### (pending) — fix: _checkWULeads queryOne destructuring bug
+**Date:** 2026-02-26
+
+- `_checkWULeads()` used `const existingRow = await queryOne(...)` — queryOne returns `{data, error}` wrapper, always truthy
+- This caused every poll to enter the "existing row" branch, never reaching the INSERT path
+- Result: wu_leads_events table was permanently empty despite correct thresholds
+- Fix: `const { data: existingRow } = await queryOne(...)`
+
+Files: `lib/metar-observer.js`
+
+---
+
+### 805ca8e — feat: thread wu_triggered through alerts for detection source visibility
+**Date:** 2026-02-26
+
+- metarPending alert: title/obs line switches based on wuTriggered (WU vs METAR boundary crossed)
+- guaranteedWinDetected: header shows "(WU-LED)" for wu_triggered entries
+- tradeEntry: observation line shows "WU: X → METAR: Y" for wu_triggered
+- Scanner: batch query wu_triggered flags from metar_pending_events into scanGuaranteedWins entries
+- Executor: passes wu_triggered through to trade record
+
+Files: `lib/alerts.js`, `lib/scanner.js`, `lib/executor.js`, `lib/metar-observer.js`
+
+---
+
+### 8d66de8 — feat: WU fast poll integration + wu_leads tuning + tiering
 **Date:** 2026-02-26
 
 Three-part fix to improve GW detection speed and reduce fast poll overhead:
@@ -32,11 +57,6 @@ Files: `config.js`, `lib/wu-scraper.js`, `lib/metar-observer.js`
 
 ---
 
-### d1bbe49 — docs: update RECENT_CHANGES.md with latest deployment logs
-**Date:** 2026-02-26
-
----
-
 ### 1fe5a76 — Fast poll 5s→15s + overlap guard
 **Date:** 2026-02-26
 
@@ -56,17 +76,14 @@ Files: `config.js`, `lib/wu-scraper.js`, `lib/metar-observer.js`
 
 ---
 
-## Post-Deployment Logs (2026-02-26 02:50 UTC)
+## Post-Deployment Logs (2026-02-26 16:35 UTC)
 
 ```
-Bot restarted at 02:45 UTC, clean startup, 0 errors
-WU-leads METAR confirmed events firing with lowered thresholds (1.0°F):
-  chicago (37°F), toronto (2°C), seattle (51°F), miami (72°F),
-  nyc (43°F), atlanta (62°F), dallas (80°F), denver (66°F)
+Bot restarted at 16:32 UTC, clean startup, cycle #1 complete in 190.9s
+Scanner: 68 markets scanned, 835 logged, 0 approved
+Monitor: 2 open positions
+Fast poll WU: 11/11 responses (nyc, chicago, miami, atlanta, seattle, london, toronto, buenos aires, ankara, paris, sao paulo)
+GW scan: 1 missed entry (above_max_ask)
 
-Scanner: 65 markets scanned, 687 logged, 0 approved
-Monitor: 4 open positions, 3 confirmed GW (toronto, chicago, seattle)
-
-Fast poll tiering active — will show "N tiered out" during daytime hours
-WU fast poll will fire for near-threshold Polymarket cities during 10am-2pm local
+wu_leads_events: 0 rows (queryOne bug just fixed — METAR currently leads WU in all cities, WU-leads pattern fires when WU peaks before METAR during 12-2pm rising phase)
 ```
