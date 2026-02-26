@@ -1,10 +1,10 @@
 # Recent Changes Log
 
-Last updated: 2026-02-26 23:15 UTC
+Last updated: 2026-02-26 23:24 UTC
 
 ## Commits
 
-### (pending) — feat: GW fast-path pipeline + fix kalshi_ask_at_detection overwrite bug
+### f98e414 — feat: GW fast-path pipeline + fix kalshi_ask_at_detection overwrite bug
 **Date:** 2026-02-26
 
 **Bug fix — kalshi_ask_at_detection overwrite:**
@@ -67,12 +67,37 @@ Files: `config.js`, `lib/wu-scraper.js`, `lib/metar-observer.js`
 
 ---
 
-## Post-Deployment Logs (2026-02-26 23:13 UTC)
+## Post-Deployment Logs (2026-02-26 23:24 UTC)
 
 ```
-Bot restarted at 23:13 UTC, clean startup
-Cycle #1: 66 markets scanned, 731 logged, 0 approved, 8 positions monitored
-Fast poll: 25 cities (4 tiered out), 0 detections (late evening, past peak hours)
-WU fast poll: 11/11 responses
-New fast-path GW pipeline active — will exercise on next boundary crossing
+Bot restarted at 23:13 UTC, clean startup (Mode: paper, 28 cities, exit evaluator: log_only)
+Bankrolls: YES $821.44 / NO $1000.00 / GW-live $10.00 / GW-paper $352.51, 8 open trades
+
+Cycle #1 (23:13-23:16, 174.5s):
+  Scan: 66 markets, 731 logged, 0 approved, 200 backfilled
+  Monitor: 8 positions evaluated, 0 exits, 8 holds (all GW — deferred to resolver)
+    GW positions: NO sao-paulo 24°C (high 25°C), NO miami 76-77°F (high 78°F),
+    NO toronto -3°C (high -2°C), NO nyc 44-45°F (high 48°F), NO buenos-aires 27°C (high 29°C),
+    YES nyc 48°F+ (high 48°F), NO dallas 78-79°F (high 82°F)
+  90s fallback GW scan: 5 missed (below_min_ask, below_metar_gap)
+  Observer: 27 cities polled, 0 new highs
+  Fast poll: 25 cities (4 tiered out), 0 detections, 11 WU
+  Calibration: 21-day window, 913 records, 176 buckets, 116 market-implied pairs
+  City gates: BLOCKED denver(6.55°F), austin(3.78°F), chicago(3.36°F), buenos-aires(1.72°C)
+              unbounded-only: LA(2.52°F), nyc(2.04°F), wellington(1.3°C)
+
+Cycle #2 (23:21+):
+  Scan: 66 markets, same pattern
+  Monitor: 8 positions, 0 exits, 8 holds
+  Fast polls: 25 cities, 0 detections, 11/11 WU — all clean
+  Fast-path GW pipeline active — no detections (late evening, past peak hours)
+
+Warnings (benign):
+  - Forecast outliers excluded: nyc/weatherapi 34.5°F (Feb 28), philly/ecmwf 40.5°F,
+    philly/openmeteo 45.1°F, dc/weatherapi 41.9°F
+  - Intraday METAR vs WU: phoenix 88 vs 85 (3°F), others ±1°F
+  - CLI vs NWS obs (Feb 25): ±1°F across 7 cities (normal)
+  - city_error_distribution: stddev_error NOT NULL constraint (pre-existing, new city w/ <2 samples)
+
+No errors. No crashes. Empty error log.
 ```
