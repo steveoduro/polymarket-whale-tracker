@@ -164,6 +164,7 @@ class Bot {
     // 4. METAR Observer: poll intraday observations for all cities
     let observerRanThisCycle = false;
     let observerNewHighs = 0;
+    let observerPendingEvents = 0;
     try {
       // Dynamic interval: 3 min during peak hours (any city 10-18 local), 10 min otherwise
       const peakConfig = config.observer.PEAK_HOURS || { start: 10, end: 18 };
@@ -181,18 +182,19 @@ class Bot {
         this.lastObserverAt = Date.now();
         observerRanThisCycle = true;
         observerNewHighs = obsResult.newHighs || 0;
+        observerPendingEvents = obsResult.newPendingEvents || 0;
         if (obsResult.citiesPolled > 0) {
-          this._log('info', `Observer: ${obsResult.citiesPolled} cities polled, ${obsResult.newHighs} new highs`);
+          this._log('info', `Observer: ${obsResult.citiesPolled} cities polled, ${obsResult.newHighs} new highs, ${observerPendingEvents} new pending`);
         }
       }
     } catch (err) {
       this._log('error', `Observer failed in cycle #${this.cycleCount}`, { error: err.message });
     }
 
-    // 4a-event. Event-driven GW scan — fires immediately when observer finds new highs
+    // 4a-event. Event-driven GW scan — fires immediately when observer finds new highs or new pending events
     try {
-      if (observerNewHighs > 0 && config.guaranteed_entry?.ENABLED) {
-        this._log('info', `Observer found ${observerNewHighs} new highs — triggering immediate GW scan`);
+      if ((observerNewHighs > 0 || observerPendingEvents > 0) && config.guaranteed_entry?.ENABLED) {
+        this._log('info', `Observer found ${observerNewHighs} new highs, ${observerPendingEvents} new pending — triggering immediate GW scan`);
         const gwResult = await this.scanner.scanGuaranteedWins();
         if (gwResult.entries.length > 0) {
           await this.alerts.guaranteedWinDetected(gwResult.entries);
@@ -212,9 +214,9 @@ class Bot {
     // 4a. Guaranteed-win entries: observation-based risk-free trades (independent 90s timer)
     try {
       if (config.guaranteed_entry?.ENABLED) {
-        // Skip if fast poll already triggered a GW scan in the last 30 seconds
+        // Skip if fast poll triggered a GW scan in the last 3 seconds (debounce only)
         const fastPollScanAge = Date.now() - (this.observer._lastFastPollGWScanAt || 0);
-        if (fastPollScanAge < 30000) {
+        if (fastPollScanAge < 3000) {
           this._log('info', `GW scan skipped — fast poll ran ${Math.round(fastPollScanAge / 1000)}s ago`);
           this.lastGWScanAt = Date.now();
         } else {
