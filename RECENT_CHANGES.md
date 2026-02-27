@@ -1,10 +1,31 @@
 # Recent Changes Log
 
-Last updated: 2026-02-27 00:16 UTC
+Last updated: 2026-02-27 15:39 UTC
 
 ## Commits
 
-### (pending) — fix: GW station bug, pending event gate, position pre-filter, bid sanity check
+### (pending) — feat: per-city calibration for cal_confirms
+**Date:** 2026-02-27
+
+**Problem:** `market_calibration` had no city dimension — pooled all cities together. Atlanta's 8-14% win rate was masked by Seoul's 44% in shared buckets. cal_confirms entered Atlanta trades using Seoul's win rate → consistent losses.
+
+**Changes:**
+- Added `city` column to `market_calibration` table (nullable — global rows leave it null)
+- `_refreshCalibrationTable()` in resolver.js: added second INSERT block that groups by city with `HAVING COUNT(*) >= 10`
+- `_getCalibration()` in scanner.js: new optional `city` param — tries city-specific key first (n >= 15 gate), falls back to global
+- `_loadCalibration()`: key construction now differentiates global vs city rows
+- All 3 `_getCalibration` call sites pass city (Kelly sizing, logging, calConfirmsEdge decision)
+- `calBucket` logging includes `|city` suffix when city row was used
+- Removed `_loadCityCalibration()`, `this._cityCal`, and zero-wins veto block (all redundant now)
+- Updated unique constraint to include city: `COALESCE(city, '')`
+
+**Result:** 176 global + 355 city = 531 calibration buckets loaded. Atlanta `bounded|12-24h|15-20c` now shows 0% city win rate (n=15) vs 10% global — cal_confirms correctly blocks.
+
+Files: `lib/scanner.js`, `lib/resolver.js`, DB migration
+
+---
+
+### da746ac — fix: GW station bug, pending event gate, position pre-filter, bid sanity check
 **Date:** 2026-02-27
 
 **Fix 1 — Station-aware observation query (critical):**
@@ -39,47 +60,12 @@ Files: `config.js`, `lib/scanner.js`, `lib/metar-observer.js`, `lib/alerts.js`
 ### f98e414 — feat: GW fast-path pipeline + fix kalshi_ask_at_detection overwrite bug
 **Date:** 2026-02-26
 
-**Bug fix — kalshi_ask_at_detection overwrite:**
-- `pendingEventMap` SELECT at metar-observer.js:868 was missing `kalshi_ask_at_detection`
-- `existingEvt.kalshi_ask_at_detection` was always `undefined` → `!undefined` = true
-- Line 756 UPDATE overwrote the column every cycle with whatever the current cached price was
-- Fix: added `ask_at_detection, kalshi_ask_at_detection, kalshi_market_id` to the SELECT
-
-**GW fast-path pipeline (3-10x faster detection→order):**
-- New `evaluateGWFastPath(candidates)` method in scanner — applies same filter chain as `scanGuaranteedWins()` but takes pre-computed data from fast poll, skips re-fetching ALL 23 cities
-- `_processRangesForCity()` now returns `gwCandidates[]` with enriched detection data (ask, effHigh, gap, tokenId, marketId, _freshBookAsk)
-- Fast poll collects gwCandidates from all 4 `_processRangesForCity` call sites, routes through `evaluateGWFastPath` instead of `scanGuaranteedWins`
-- Observation writes moved AFTER order placement (non-blocking) — saves ~100ms on critical path
-- `executeBuy()` accepts `_freshAskFromBook` from pre-fetched CLOB orderbook, skips Gamma API getPrice call (~150-300ms saved)
-- 90-second fallback `scanGuaranteedWins()` in bot.js remains unchanged as safety net
-
-**Pipeline improvement:**
-- Post-detection: 650ms-5.9s → 210-510ms (3-10x faster)
-- Eliminates: 23 DB observation queries, 23 getMarkets calls, 1 Gamma API call per live order
-
 Files: `lib/metar-observer.js`, `lib/scanner.js`, `lib/executor.js`, `lib/platform-adapter.js`
 
 ---
 
 ### 7c84ac9 — fix: GW pipeline — allow multiple NOs, fix Kalshi missed alerts, platform-aware dedup
 **Date:** 2026-02-26
-
-**Fix 1 — Allow multiple NO trades per GW city/date:**
-- Scanner: removed `_openNoKeys` mutual exclusivity check for GW NOs
-- Scanner: dedup key for NOs now includes `range_name` (keeps all qualifying NO ranges, not just best margin)
-- Executor: removed NO mutual exclusivity check (multiple NOs can all win when temp exceeds multiple boundaries)
-
-**Fix 2 — Fix Kalshi GW missed alerts not appearing on Telegram:**
-- Root cause: scanner line 854 had `ask >= 1` → silent continue, dropping entries before `missed[]` logic
-- Fix: removed `ask >= 1` guard, entries now flow to MAX_ASK filter which adds to `missed[]`
-- Added `ask < 1.0` check in above_max_ask path — fully repriced $1 markets are noise, only near-misses alert
-- Result: 85 → 2 missed entries (only actionable below_min_ask), Kalshi GW now visible on Telegram
-
-**Fix 3 — Platform-aware mutual exclusivity (cross-platform blocking bug):**
-- `_openYesKeys` and `_openNoKeys` now include platform in key
-- Previously: Polymarket YES trade on NYC blocked Kalshi YES on NYC (wrong — independent platforms)
-- Executor: YES mutual exclusivity query now includes `platform = $4` filter
-- Regular scan paths updated to use platform-aware keys
 
 Files: `lib/scanner.js`, `lib/executor.js`
 
@@ -99,18 +85,28 @@ Files: `config.js`, `lib/wu-scraper.js`, `lib/metar-observer.js`
 
 ---
 
-## Post-Deployment Logs (2026-02-27 00:16 UTC)
+## Post-Deployment Logs (2026-02-27 15:39 UTC)
 
 ```
-Bot restarted at 00:12 UTC with all 4 GW fixes, clean startup
-10 open positions (8 prior + 2 bad Chicago trades from station bug)
+Bot restarted at 15:28 UTC with per-city calibration changes
 
-Cycle #1 (00:12-00:15):
-  Monitor: 10 positions, 0 exits, 10 holds
-  GW scan: 1 missed entry (below_metar_gap) — down from 5 before fixes
-  No Chicago re-entries (pending event gate + station fix working)
-  Fast poll: 25 cities (3 tiered out), 0 detections, 11/11 WU
-  Observer: 27 cities polled, 0 new highs
+Cycle #1 (15:28-15:31):
+  Scanner: Loaded 176 calibration buckets (pre-rebuild, global only)
+  Scan: 68 markets, 865 logged, 0 approved, 0 entered
+  Monitor: 2 positions, 0 exits, 2 holds
+  Observer: 28 cities polled, 2 new highs
+  Resolver: Market calibration table refreshed (now has global + city rows)
+  Backfilled 200 opportunities
+  Cycle complete in 182.9s
+
+Cycle #2 (15:36-15:39):
+  Scanner: Loaded 531 calibration buckets (176 global + 355 city)
+  Scan: 68 markets, 865 logged, 0 approved, 0 entered
+  Monitor: 2 positions, 0 exits, 2 holds
+  Observer: 28 cities polled, 2 new highs (nyc KLGA 35°F, nyc KNYC 37°F)
+  Fast poll: 26 cities (19 tiered out), 0 detections, 7/7 WU
+  Resolver: Market calibration table refreshed
+  Cycle complete in 147.0s
 
 No errors. No crashes. Empty error log.
 ```
