@@ -1,18 +1,24 @@
 # Recent Changes Log
 
-Last updated: 2026-02-27 21:01 UTC
+Last updated: 2026-02-27 21:45 UTC
 
 ## Commits
 
-### (pending) — GW research: fix dropped detections, adjacent-NO protection, race dedup, range_type bug
+### (pending) — GW research: Kalshi resolution must use CLI, not NWS obs
 **Date:** 2026-02-27
 
 **Changes:**
-- **GW Research Fix #1 — Dropped detections**: 30s suppression window → 3s debounce (was blocking 90s fallback scan)
-- **GW Research Fix #1 — Pending event trigger**: `_checkMetarPending()` returns newAlerts count, `observe()` surfaces `newPendingEvents`, event-driven GW scan fires on new pending events (not just new highs)
-- **Adjacent-NO protection**: Skip NO entry when `range_max <= open YES range_min` (correlated risk). 3-layer check: executor DB safety net + scanner `scanGuaranteedWins` + fast-path `evaluateGWFastPath`
-- **Race dedup**: In-memory `_gwSubmitted` Set on Executor closes race window between async DB duplicate checks
-- **range_type bug fix**: GW fast-poll candidates now include `range_type` — was causing NOT NULL constraint violation on trades INSERT (blocked Dallas 80-81 and OKC 77-78 entries)
+- **Bug**: Kalshi trades resolved at midnight local using NWS hourly obs instead of CLI (the authoritative source Kalshi actually uses). CLI isn't published until ~6-7 AM local. NWS obs can differ by 1-2°F.
+- **Fix**: `_getActualHigh()` for Kalshi now waits for CLI. For dates <3 days old, returns null if CLI unavailable (trade stays open). Falls through to NWS obs only for dates >3 days old (permanent CLI gaps).
+- **Cache fix**: `cliCache` now cleared every resolver cycle (was persisting stale data across cycles, preventing CLI from being found after publication)
+- **Backfill**: Corrected 24,311 Kalshi opportunities, 4 trades, 41 market_resolutions, 10 forecast_accuracy rows with CLI temps. 6,113 opportunity `would_have_won` values were wrong.
+
+Files: `lib/resolver.js`, DB backfill
+
+---
+
+### 3bf6fdd — GW research: fix dropped detections, adjacent-NO protection, race dedup, range_type bug
+**Date:** 2026-02-27
 
 Files: `bot.js`, `lib/executor.js`, `lib/scanner.js`, `lib/metar-observer.js`, `GW_RESEARCH.md`
 
@@ -25,31 +31,25 @@ Files: `lib/scanner.js`, `lib/resolver.js`, DB migration
 
 ---
 
-### 9960524 — feat: database schema restructure — market_resolutions, ML features, mviews
-**Date:** 2026-02-27
-
-Files: `lib/scanner.js`, `lib/resolver.js`, `ml_win_predictor.py`, `SCHEMA.md`, DB migrations
-
----
-
-### 60242b8 — feat: per-city calibration for cal_confirms
-**Date:** 2026-02-27
-
-Files: `lib/scanner.js`, `lib/resolver.js`, DB migration
-
----
-
-## Post-Deployment Logs (2026-02-27 21:01 UTC)
+## Post-Deployment Logs (2026-02-27 21:37 UTC)
 
 ```
-Bot restarted at 21:00 UTC with GW research fixes
+Bot restarted at 21:34 UTC with CLI-only Kalshi resolution
 
-Key events from previous cycle:
-  Observer: 28 cities polled, 0 new highs, 0 new pending (new log format working)
-  GW fast-poll detected: dallas 80-81°F NO (ask=0.90, Kalshi), oklahoma city 77-78°F NO (ask=0.93, Kalshi)
-  GW fast-path: 2 entries approved from 3 candidates
-  ERROR: range_type NULL constraint on trades INSERT — FIXED in this commit
-  90s fallback scan running correctly (no suppression)
+Cycle #1:
+  Scanner: 67 markets, 771 logged, 0 approved
+  Monitor: 3 positions (incl Dallas 80-81 GW), 0 exits
+  Resolver: 0 trades resolved (Dallas stays open — CLI for today not yet available), 200 opps backfilled
+  CLI vs NWS obs mismatch logged: denver 2026-02-25 (cli=67, nws=66, diff=1)
+  Materialized views refreshed
 
-Empty error log after restart.
+Backfill corrections applied:
+  24,311 opportunities: actual_temp corrected to CLI
+  6,113 opportunities: would_have_won flipped
+  4 trades: actual_temp corrected
+  41 market_resolutions: actual_temp corrected
+  10 forecast_accuracy: actual_temp, error, abs_error corrected
+  All 3 mviews refreshed
+
+Empty error log.
 ```
