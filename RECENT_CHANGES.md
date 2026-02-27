@@ -1,8 +1,22 @@
 # Recent Changes Log
 
-Last updated: 2026-02-27 21:45 UTC
+Last updated: 2026-02-27 22:15 UTC
 
 ## Commits
+
+### (pending) — GW research: fix fast-path parity, duplicate alert dedup
+
+**Date:** 2026-02-27
+
+**Changes:**
+- **Bug**: `evaluateGWFastPath` (fast-poll entry builder) was missing `wu_high`, had `dual_confirmed` hardcoded false, and `entry_reason` always `guaranteed_win_metar_only` — while `scanGuaranteedWins` (slow path) computed all three correctly
+- **Fix**: Fast-path now passes `metar_high` and `wu_high` separately through candidate objects, computes `dual_confirmed` by checking both sources independently cross the boundary, sets `entry_reason` based on result
+- **Bug**: Duplicate Telegram "Executing..." alerts — fast-poll sent alert, then event-driven GW scan in main cycle re-detected same entry and sent second alert
+- **Fix**: Event-driven GW scan now gated by same 3s fast-poll debounce as the 90s timer scan
+
+Files: `bot.js`, `lib/scanner.js`, `lib/metar-observer.js`
+
+---
 
 ### (pending) — GW research: Kalshi resolution must use CLI, not NWS obs
 **Date:** 2026-02-27
@@ -31,25 +45,19 @@ Files: `lib/scanner.js`, `lib/resolver.js`, DB migration
 
 ---
 
-## Post-Deployment Logs (2026-02-27 21:37 UTC)
+## Post-Deployment Logs (2026-02-27 22:13 UTC)
 
 ```
-Bot restarted at 21:34 UTC with CLI-only Kalshi resolution
+Bot restarted at 22:10 UTC with fast-path parity + alert dedup fixes
 
 Cycle #1:
-  Scanner: 67 markets, 771 logged, 0 approved
+  Scanner: 67 markets, 764 logged, 0 approved
   Monitor: 3 positions (incl Dallas 80-81 GW), 0 exits
-  Resolver: 0 trades resolved (Dallas stays open — CLI for today not yet available), 200 opps backfilled
-  CLI vs NWS obs mismatch logged: denver 2026-02-25 (cli=67, nws=66, diff=1)
-  Materialized views refreshed
-
-Backfill corrections applied:
-  24,311 opportunities: actual_temp corrected to CLI
-  6,113 opportunities: would_have_won flipped
-  4 trades: actual_temp corrected
-  41 market_resolutions: actual_temp corrected
-  10 forecast_accuracy: actual_temp, error, abs_error corrected
-  All 3 mviews refreshed
+  Observer: 28 cities polled, 0 new highs, 0 new pending
+  GW scan: 2 missed (below_metar_gap, above_max_ask)
+  Resolver: 0 resolved, 200 opps backfilled
+  Fast poll: running every 15s, WU 10/10 responses
+  CLI vs NWS obs mismatch: nyc 2026-02-26 (cli=49, nws=48), san antonio 2026-02-26 (cli=95, nws=93)
 
 Empty error log.
 ```

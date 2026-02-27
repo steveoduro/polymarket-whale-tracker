@@ -191,21 +191,27 @@ class Bot {
       this._log('error', `Observer failed in cycle #${this.cycleCount}`, { error: err.message });
     }
 
-    // 4a-event. Event-driven GW scan — fires immediately when observer finds new highs or new pending events
+    // 4a-event. Event-driven GW scan — fires when observer finds new highs or pending events
+    // Gated by fast-poll debounce to prevent duplicate alerts (fast-poll already handles these)
     try {
       if ((observerNewHighs > 0 || observerPendingEvents > 0) && config.guaranteed_entry?.ENABLED) {
-        this._log('info', `Observer found ${observerNewHighs} new highs, ${observerPendingEvents} new pending — triggering immediate GW scan`);
-        const gwResult = await this.scanner.scanGuaranteedWins();
-        if (gwResult.entries.length > 0) {
-          await this.alerts.guaranteedWinDetected(gwResult.entries);
-          const gwTrades = await this.executor.executeGuaranteedWins(gwResult.entries);
-          this._log('info', `Event-driven GW: ${gwResult.entries.length} found, ${gwTrades.length} entered`);
+        const fastPollAge = Date.now() - (this.observer._lastFastPollGWScanAt || 0);
+        if (fastPollAge < 3000) {
+          this._log('info', `Event-driven GW scan skipped — fast poll ran ${Math.round(fastPollAge / 1000)}s ago`);
+          this.lastGWScanAt = Date.now();
+        } else {
+          this._log('info', `Observer found ${observerNewHighs} new highs, ${observerPendingEvents} new pending — triggering immediate GW scan`);
+          const gwResult = await this.scanner.scanGuaranteedWins();
+          if (gwResult.entries.length > 0) {
+            await this.alerts.guaranteedWinDetected(gwResult.entries);
+            const gwTrades = await this.executor.executeGuaranteedWins(gwResult.entries);
+            this._log('info', `Event-driven GW: ${gwResult.entries.length} found, ${gwTrades.length} entered`);
+          }
+          if (gwResult.missed?.length > 0) {
+            await this.alerts.guaranteedWinMissed(gwResult.missed);
+          }
+          this.lastGWScanAt = Date.now();
         }
-        if (gwResult.missed?.length > 0) {
-          await this.alerts.guaranteedWinMissed(gwResult.missed);
-        }
-        // Reset timer so we don't double-scan shortly after
-        this.lastGWScanAt = Date.now();
       }
     } catch (err) {
       this._log('error', 'Event-driven GW scan failed', { error: err.message });
