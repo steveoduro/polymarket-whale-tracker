@@ -1,8 +1,40 @@
 # Recent Changes Log
 
-Last updated: 2026-02-26 23:24 UTC
+Last updated: 2026-02-27 00:16 UTC
 
 ## Commits
+
+### (pending) — fix: GW station bug, pending event gate, position pre-filter, bid sanity check
+**Date:** 2026-02-27
+
+**Fix 1 — Station-aware observation query (critical):**
+- `scanGuaranteedWins()` used `_getLatestObservation(city, date)` with no station filter
+- For dual-station cities (Chicago KORD/KMDW, NYC KLGA/KNYC), whichever wrote last won
+- Chicago KMDW=42°F was used for PM ranges when KORD=41°F is correct → entered 2 losing trades
+- Fix: `_getLatestObservation` accepts optional stationId; scanner loads per-platform observations
+
+**Fix 2 — Gate scanGuaranteedWins on pending events:**
+- 90s fallback was a price-polling engine — re-entered on stale crossings when ask drifted
+- Chicago trades entered 82-96 min after detection, no new METAR data, just ask drift
+- Fix: load `metar_pending_events` at scan start, skip ranges with no temperature crossing
+- Fails open if query errors (existing behavior preserved)
+
+**Fix 3 — Pre-filter open positions before filter chain:**
+- Dedup ran after ask filters → held positions with repriced ask hit `missed[]`
+- Produced false "GUARANTEED WIN MISSED" Telegram alerts for positions already held
+- Fix: early continue at top of range loop using `_positionKeys` (both methods)
+
+**Fix 4 — GW_MIN_BID market sanity check:**
+- Chicago YES "42°F or higher" had bid=$0.01, ask=$0.33 — market priced near-zero
+- Scanner entered anyway because it only checked ask
+- Fix: `GW_MIN_BID: 0.10` in config, check in both `scanGuaranteedWins` and `evaluateGWFastPath`
+- Shows as `below_min_bid` in missed alerts
+
+**Result:** GW scan went from 5 missed entries → 1 (legitimate `below_metar_gap`). No false re-entries.
+
+Files: `config.js`, `lib/scanner.js`, `lib/metar-observer.js`, `lib/alerts.js`
+
+---
 
 ### f98e414 — feat: GW fast-path pipeline + fix kalshi_ask_at_detection overwrite bug
 **Date:** 2026-02-26
@@ -67,37 +99,18 @@ Files: `config.js`, `lib/wu-scraper.js`, `lib/metar-observer.js`
 
 ---
 
-## Post-Deployment Logs (2026-02-26 23:24 UTC)
+## Post-Deployment Logs (2026-02-27 00:16 UTC)
 
 ```
-Bot restarted at 23:13 UTC, clean startup (Mode: paper, 28 cities, exit evaluator: log_only)
-Bankrolls: YES $821.44 / NO $1000.00 / GW-live $10.00 / GW-paper $352.51, 8 open trades
+Bot restarted at 00:12 UTC with all 4 GW fixes, clean startup
+10 open positions (8 prior + 2 bad Chicago trades from station bug)
 
-Cycle #1 (23:13-23:16, 174.5s):
-  Scan: 66 markets, 731 logged, 0 approved, 200 backfilled
-  Monitor: 8 positions evaluated, 0 exits, 8 holds (all GW — deferred to resolver)
-    GW positions: NO sao-paulo 24°C (high 25°C), NO miami 76-77°F (high 78°F),
-    NO toronto -3°C (high -2°C), NO nyc 44-45°F (high 48°F), NO buenos-aires 27°C (high 29°C),
-    YES nyc 48°F+ (high 48°F), NO dallas 78-79°F (high 82°F)
-  90s fallback GW scan: 5 missed (below_min_ask, below_metar_gap)
+Cycle #1 (00:12-00:15):
+  Monitor: 10 positions, 0 exits, 10 holds
+  GW scan: 1 missed entry (below_metar_gap) — down from 5 before fixes
+  No Chicago re-entries (pending event gate + station fix working)
+  Fast poll: 25 cities (3 tiered out), 0 detections, 11/11 WU
   Observer: 27 cities polled, 0 new highs
-  Fast poll: 25 cities (4 tiered out), 0 detections, 11 WU
-  Calibration: 21-day window, 913 records, 176 buckets, 116 market-implied pairs
-  City gates: BLOCKED denver(6.55°F), austin(3.78°F), chicago(3.36°F), buenos-aires(1.72°C)
-              unbounded-only: LA(2.52°F), nyc(2.04°F), wellington(1.3°C)
-
-Cycle #2 (23:21+):
-  Scan: 66 markets, same pattern
-  Monitor: 8 positions, 0 exits, 8 holds
-  Fast polls: 25 cities, 0 detections, 11/11 WU — all clean
-  Fast-path GW pipeline active — no detections (late evening, past peak hours)
-
-Warnings (benign):
-  - Forecast outliers excluded: nyc/weatherapi 34.5°F (Feb 28), philly/ecmwf 40.5°F,
-    philly/openmeteo 45.1°F, dc/weatherapi 41.9°F
-  - Intraday METAR vs WU: phoenix 88 vs 85 (3°F), others ±1°F
-  - CLI vs NWS obs (Feb 25): ±1°F across 7 cities (normal)
-  - city_error_distribution: stddev_error NOT NULL constraint (pre-existing, new city w/ <2 samples)
 
 No errors. No crashes. Empty error log.
 ```

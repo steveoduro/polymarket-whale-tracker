@@ -162,6 +162,7 @@ const config = {
     METAR_ONLY_MIN_GAP_C: 0.5,            // min gap (°C) above threshold for METAR-only entry (Polymarket)
     GW_NEAR_THRESHOLD_BUFFER_F: 1.0,      // fast poll: only process cities within this buffer of a GW boundary (°F)
     GW_NEAR_THRESHOLD_BUFFER_C: 0.5,      // fast poll: only process cities within this buffer of a GW boundary (°C)
+    GW_MIN_BID: 0.10,                         // market sanity: don't enter if bid < 10¢ (market disagrees with signal)
     GW_LIVE_ENABLED: false,                 // kill switch — flip to true when ready to go live
     GW_METAR_BANKROLL: 10,                  // live pool ($10 test)
     GW_PAPER_BANKROLL: 1000,                // paper simulation continues at $1000
