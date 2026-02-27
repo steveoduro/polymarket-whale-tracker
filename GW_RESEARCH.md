@@ -271,7 +271,7 @@ Risk: higher — temp might not actually cross. Use smaller position size.
 
 1. ~~**Debug dropped detections**~~ ✅ DONE (2026-02-27) — Fixed: 30s suppression window → 3s, added newPendingEvents trigger for main_observer detections
 2. **Add WU PWS polling** — integrate into metarFastPoll, build pws_running_high, use as primary detection
-3. **Re-enable Kalshi GW** — add `guaranteedWinEnabled: true` for Kalshi platform, wider gap (2°F+)
+3. ~~**Re-enable Kalshi GW**~~ ✅ DONE (2026-02-27) — Was already `guaranteedWinEnabled: true`. Verified: 2 Kalshi GW trades in DB (Dallas 80-81° open, NYC 30-31° resolved). Missed detections were correctly blocked by 1.5°F dual-station gap, not config. Same-batch adjacent-NO protection added.
 4. **Config tuning** — lower MIN_ASK to 0.15, raise MAX_BANKROLL_PCT to 0.30, widen threshold buffer
 5. **Multi-NO entry** — ensure multiple NO ranges can be entered when temp is well above threshold
 6. **Market price signal** — detect rapid ask drops as proxy for boundary crossing
