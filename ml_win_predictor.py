@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ml_win_predictor.py — LightGBM classifier for opportunity win prediction.
-Connects directly to PostgreSQL. Read-only analysis — no DB writes.
+Reads from features_ml_mv materialized view. Read-only analysis — no DB writes.
 """
 
 import os
@@ -20,14 +20,9 @@ DATABASE_URL = os.environ['DATABASE_URL']
 def get_data():
     conn = psycopg2.connect(DATABASE_URL)
     query = """
-        SELECT city, platform, range_type, side, ask, bid, spread,
-               our_probability, ensemble_std_dev, hours_to_resolution,
-               range_width, would_have_won, created_at
-        FROM opportunities
-        WHERE (model_valid = true OR model_valid IS NULL)
-          AND platform = 'polymarket'
-          AND would_have_won IS NOT NULL
-          AND ask IS NOT NULL AND our_probability IS NOT NULL
+        SELECT *
+        FROM features_ml_mv
+        WHERE would_have_won IS NOT NULL
     """
     df = pd.read_sql(query, conn)
     conn.close()
@@ -37,24 +32,34 @@ def engineer_features(df):
     df = df.copy()
     df['target'] = df['would_have_won'].astype(int)
     df['range_type_enc'] = (df['range_type'] == 'unbounded').astype(int)
-    df['side_enc'] = (df['side'] == 'YES').astype(int)
 
     le = LabelEncoder()
     df['city_enc'] = le.fit_transform(df['city'])
     city_mapping = dict(zip(le.classes_, le.transform(le.classes_)))
 
     df['created_at'] = pd.to_datetime(df['created_at'])
-    df['month'] = df['created_at'].dt.month
     df['hour_of_day'] = df['created_at'].dt.hour
 
-    df['ask'] = df['ask'].astype(float)
-    df['bid'] = df['bid'].astype(float)
-    df['spread'] = df['spread'].astype(float)
-    df['our_probability'] = df['our_probability'].astype(float)
-    df['ensemble_std_dev'] = pd.to_numeric(df['ensemble_std_dev'], errors='coerce')
-    df['hours_to_resolution'] = pd.to_numeric(df['hours_to_resolution'], errors='coerce')
-    df['range_width'] = pd.to_numeric(df['range_width'], errors='coerce')
+    # Encode forecast_confidence as ordinal
+    conf_map = {'very-high': 4, 'high': 3, 'medium': 2, 'low': 1}
+    df['confidence_enc'] = df['forecast_confidence'].map(conf_map).fillna(0).astype(int)
 
+    # Ensure numeric types (pg numeric returns Decimal)
+    numeric_cols = ['ask', 'bid', 'spread', 'our_probability', 'ensemble_std_dev',
+                    'hours_to_resolution', 'range_width', 'edge_pct', 'volume',
+                    'corrected_probability', 'correction_ratio',
+                    'forecast_to_near_edge', 'forecast_to_far_edge',
+                    'source_disagreement_deg', 'market_implied_divergence',
+                    'cal_empirical_win_rate', 'cal_true_edge',
+                    'ecmwf_member_std_c', 'ecmwf_member_range_c',
+                    'month', 'day_of_week']
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    df['forecast_in_range_enc'] = df['forecast_in_range'].astype(float) if 'forecast_in_range' in df.columns else 0.0
+
+    # Derived features
     df['ask_x_hours'] = df['ask'] * df['hours_to_resolution']
     df['prob_minus_ask'] = df['our_probability'] - df['ask']
 
@@ -62,8 +67,15 @@ def engineer_features(df):
 
 FEATURES = [
     'ask', 'bid', 'spread', 'our_probability', 'ensemble_std_dev',
-    'hours_to_resolution', 'range_width', 'range_type_enc', 'side_enc',
-    'city_enc', 'month', 'hour_of_day', 'ask_x_hours', 'prob_minus_ask'
+    'hours_to_resolution', 'range_width', 'range_type_enc',
+    'city_enc', 'month', 'hour_of_day', 'day_of_week',
+    'ask_x_hours', 'prob_minus_ask',
+    'edge_pct', 'volume', 'confidence_enc',
+    'corrected_probability', 'correction_ratio',
+    'forecast_to_near_edge', 'forecast_to_far_edge', 'forecast_in_range_enc',
+    'source_disagreement_deg', 'market_implied_divergence',
+    'cal_empirical_win_rate', 'cal_true_edge',
+    'ecmwf_member_std_c', 'ecmwf_member_range_c',
 ]
 
 def main():
@@ -72,9 +84,9 @@ def main():
     print("=" * 70)
 
     # Load data
-    print("\n[1] Loading data from PostgreSQL...")
+    print("\n[1] Loading data from features_ml_mv...")
     df = get_data()
-    print(f"    Loaded {len(df):,} resolved polymarket opportunities")
+    print(f"    Loaded {len(df):,} resolved YES opportunities")
 
     # Feature engineering
     df, city_mapping = engineer_features(df)
@@ -89,16 +101,26 @@ def main():
     print(f"    Train win rate: {train['target'].mean():.3f}")
     print(f"    Test  win rate: {test['target'].mean():.3f}")
 
-    # Drop rows with NaN features
-    train_clean = train.dropna(subset=FEATURES)
-    test_clean = test.dropna(subset=FEATURES)
-    print(f"    Train after NaN drop: {len(train_clean):,}")
-    print(f"    Test  after NaN drop: {len(test_clean):,}")
+    # LightGBM handles NaN natively — no need to drop rows
+    # Just ensure all feature columns exist and are float
+    for feat in FEATURES:
+        if feat not in train.columns:
+            train[feat] = np.nan
+            test[feat] = np.nan
+        train[feat] = train[feat].astype(float)
+        test[feat] = test[feat].astype(float)
+
+    train_clean = train.copy()
+    test_clean = test.copy()
 
     X_train = train_clean[FEATURES]
     y_train = train_clean['target']
     X_test = test_clean[FEATURES]
     y_test = test_clean['target']
+
+    print(f"    Train rows: {len(X_train):,}")
+    print(f"    Test  rows: {len(X_test):,}")
+    print(f"    Features: {len(FEATURES)}")
 
     # Train model
     print("\n[2] Training LightGBM...")
@@ -122,14 +144,14 @@ def main():
 
     # ── Feature Importance ──
     print("\n" + "=" * 70)
-    print("[3] FEATURE IMPORTANCE (top 15 by gain)")
+    print("[3] FEATURE IMPORTANCE (top 20 by gain)")
     print("=" * 70)
     importances = model.feature_importances_
     feat_imp = sorted(zip(FEATURES, importances), key=lambda x: -x[1])
-    print(f"{'Feature':<25} {'Gain':>10}")
-    print("-" * 36)
-    for feat, imp in feat_imp[:15]:
-        print(f"{feat:<25} {imp:>10.0f}")
+    print(f"{'Feature':<30} {'Gain':>10}")
+    print("-" * 41)
+    for feat, imp in feat_imp[:20]:
+        print(f"{feat:<30} {imp:>10.0f}")
 
     # ── Seoul Isolation ──
     print("\n" + "=" * 70)
@@ -217,17 +239,17 @@ def main():
     print("=" * 70)
     test_clean['miss'] = (test_clean['pred_prob'] - test_clean['target']).abs()
     worst = test_clean.nlargest(20, 'miss')
-    print(f"  {'City':<14} {'Type':<10} {'Side':<5} {'Ask':>5} {'Hrs':>6} {'OurProb':>8} {'Pred':>6} {'Won':>4}")
-    print("  " + "-" * 60)
+    print(f"  {'City':<14} {'Type':<10} {'Ask':>5} {'Hrs':>6} {'OurProb':>8} {'Pred':>6} {'Won':>4}")
+    print("  " + "-" * 55)
     for _, row in worst.iterrows():
-        print(f"  {row['city']:<14} {row['range_type']:<10} {row['side']:<5} "
+        print(f"  {row['city']:<14} {row['range_type']:<10} "
               f"{row['ask']:>5.2f} {row['hours_to_resolution']:>6.0f} "
               f"{row['our_probability']:>8.3f} {row['pred_prob']:>6.3f} "
               f"{int(row['target']):>4}")
 
     # ── Save Predictions ──
     out_path = os.path.join(os.path.dirname(__file__), 'ml_predictions_test.csv')
-    save_cols = FEATURES + ['city', 'range_type', 'side', 'pred_prob', 'would_have_won', 'created_at']
+    save_cols = FEATURES + ['city', 'range_type', 'pred_prob', 'would_have_won', 'created_at']
     test_clean[save_cols].to_csv(out_path, index=False)
     print(f"\n  Saved {len(test_clean):,} test predictions to {out_path}")
 

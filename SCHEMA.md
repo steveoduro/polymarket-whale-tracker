@@ -1,6 +1,11 @@
 # Database Schema Reference
 
-PostgreSQL via Supabase (direct pg connection). All timestamps UTC.
+PostgreSQL (self-hosted, localhost:5432). All timestamps UTC.
+
+Three-layer architecture:
+1. **Base tables** — append-only, single responsibility (opportunities, trades, market_resolutions)
+2. **Lookup tables** — rebuilt by resolver each cycle (model_calibration, market_calibration, city_error_distribution)
+3. **Materialized views** — pre-joined, refreshed after each resolution cycle (market_outcomes_mv, features_ml_mv, performance_mv)
 
 ---
 
@@ -41,7 +46,7 @@ min_probability_seen,  -- only if new low
 evaluator_log          -- JSON array, last 500 entries
 ```
 
-### UPDATE (resolver — resolver.js:238, on resolution)
+### UPDATE (resolver — resolver.js:241, on resolution)
 ```
 status = 'resolved', actual_temp, won, pnl, fees,
 resolved_at, resolution_station, observation_high, wu_high
@@ -77,18 +82,19 @@ resolved_at, resolution_station, observation_high, wu_high
 
 Every range evaluated each scan cycle. One row per range/side/cycle.
 
-### INSERT (scanner.js:609)
+### INSERT (scanner.js:664)
 ```
 city, target_date, platform, market_id, range_name, range_min, range_max,
 range_type, range_unit, side, bid, ask, spread, volume,
 forecast_temp, forecast_confidence, forecast_sources,
 ensemble_temp, ensemble_std_dev, our_probability, edge_pct,
 expected_value, kelly_fraction, action, filter_reason,
-would_pass_at_5pct, would_pass_at_8pct, would_pass_at_10pct, would_pass_at_15pct,
-old_filter_would_block, old_filter_reasons, hours_to_resolution, range_width,
+hours_to_resolution, range_width,
 bid_depth, ask_depth,
 cal_empirical_win_rate, cal_n, cal_true_edge, cal_bucket,
-corrected_probability, correction_ratio
+corrected_probability, correction_ratio,
+forecast_to_near_edge, forecast_to_far_edge, forecast_in_range,
+source_disagreement_deg, market_implied_divergence
 ```
 
 ### Backfill columns (set by resolver, not at INSERT)
@@ -101,7 +107,7 @@ actual_temp, winning_range, would_have_won, resolved_at, trade_id, model_valid
 |--------|------|-------|
 | `our_probability` | numeric | Raw model probability (0-1) |
 | `corrected_probability` | numeric | After calibration correction (NULL if no correction) |
-| `edge_pct` | numeric | (probability - ask) / ask * 100 |
+| `edge_pct` | numeric | (probability - ask) * 100 |
 | `ensemble_temp` | numeric | Weighted ensemble forecast temp (city's unit) |
 | `ensemble_std_dev` | numeric | Std dev used for probability calc (city's unit) |
 | `forecast_temp` | numeric | Same as ensemble_temp for Polymarket; kalshiTemp for Kalshi |
@@ -113,11 +119,21 @@ actual_temp, winning_range, would_have_won, resolved_at, trade_id, model_valid
 | `actual_temp` | numeric | Backfilled — actual observed high for resolution |
 | `winning_range` | text | Backfilled — which range name won |
 | `model_valid` | boolean | NULL or true; used to exclude invalidated model data |
-| `would_pass_at_*` | boolean | Counterfactual: would this pass at different edge thresholds |
 | `cal_*` | various | Calibration bucket data (empirical win rate, n, true edge) |
 | `correction_ratio` | numeric | From model_calibration table (actual_win_rate / avg_model_prob) |
 | `bid_depth` / `ask_depth` | jsonb | Order book depth snapshot |
 | `range_type` | text | 'bounded' or 'unbounded' (same as trades — no suffix in DB) |
+| `forecast_to_near_edge` | numeric | Signed distance from ensemble_temp to closer range boundary. Negative = inside range. NULL for historical data before this column was added. |
+| `forecast_to_far_edge` | numeric | Signed distance to farther boundary. NULL for unbounded ranges. |
+| `forecast_in_range` | boolean | True if ensemble_temp within [range_min, range_max]. |
+| `source_disagreement_deg` | numeric | Std dev across individual forecast source temps. NULL if <2 sources. |
+| `market_implied_divergence` | numeric | ensemble_temp - market_implied_mean. Sparse in historical data (market_implied only loaded for 3 recent days). |
+
+### Dropped columns (removed Feb 27, 2026)
+The following columns were removed as dead/derivable:
+- `would_pass_at_5pct`, `would_pass_at_8pct`, `would_pass_at_10pct`, `would_pass_at_15pct` — derivable as `edge_pct >= X`
+- `old_filter_would_block`, `old_filter_reasons` — retired v1 filter comparison
+- `summary_count`, `min_edge_pct`, `max_edge_pct` — retired summary-row pattern
 
 ### action values (verified from DB)
 | Value | Count | Meaning |
@@ -135,6 +151,33 @@ max_model_market_ratio, min_hours, city_mae_gate, observation_boundary,
 market_divergence, platform_trading_disabled, kalshi_city_blocked,
 calBlocksEdge, high_std_range_ratio
 ```
+
+---
+
+## market_resolutions (NEW)
+
+Resolution facts for each resolved market. One row per unique market_id. Written by resolver at trade resolution time and during opportunity backfill. This is the single source of truth for resolution data — the backfill columns on `opportunities` are kept for backward compatibility with calibration rebuilds.
+
+### INSERT (resolver.js — _resolveTrades + _backfillOpportunities)
+```
+market_id, city, target_date, platform, range_name, range_min, range_max,
+range_type, range_unit, actual_temp, winning_range, resolved_at, resolution_station
+```
+Conflict key: `UNIQUE (market_id)` — ON CONFLICT DO NOTHING (dedup).
+
+### Key column notes
+| Column | Type | Notes |
+|--------|------|-------|
+| `market_id` | text | Unique market identifier from platform |
+| `actual_temp` | numeric | Observed high temperature (in range_unit) |
+| `winning_range` | text | Range name that won, or NULL if no range won |
+| `resolved_at` | timestamptz | When resolution was determined |
+| `resolution_station` | text | Station/source used for resolution (NULL for backfilled) |
+
+### Indexes
+- `UNIQUE (market_id)` — primary dedup key
+- `(city, target_date)` — city/date lookups
+- `(platform, target_date)` — platform filtering
 
 ---
 
@@ -188,18 +231,6 @@ error, abs_error, unit, hours_before_resolution
 | `confidence` | text | 'very-high', 'high', 'medium', 'low' |
 | `hours_before_resolution` | numeric | Lead time when forecast was made |
 
-### Common queries
-```sql
--- Per-source MAE
-SELECT source, unit, ROUND(AVG(abs_error)::numeric, 2) as mae, COUNT(*) as n
-FROM v2_forecast_accuracy GROUP BY source, unit ORDER BY unit, mae;
-
--- Per-city ensemble accuracy
-SELECT city, unit, ROUND(AVG(abs_error)::numeric, 2) as mae, COUNT(*) as n
-FROM v2_forecast_accuracy WHERE source = 'ensemble_corrected'
-GROUP BY city, unit ORDER BY unit, mae;
-```
-
 ---
 
 ## city_error_distribution
@@ -235,15 +266,6 @@ city, station, target_date, cli_high_f, nws_obs_high_f, diff_f, cli_raw
 ```
 Conflict key: `(city, target_date)`
 
-### Key column notes
-| Column | Type | Notes |
-|--------|------|-------|
-| `station` | text | ICAO station code (e.g., KNYC, KAUS) |
-| `cli_high_f` | numeric | Daily high from NWS CLI report (what Kalshi uses) |
-| `nws_obs_high_f` | numeric | Max from NWS hourly observations |
-| `diff_f` | numeric | cli_high_f - nws_obs_high_f |
-| `cli_raw` | jsonb | Raw CLI report data for debugging |
-
 ---
 
 ## metar_observations
@@ -257,20 +279,6 @@ running_high_c, running_high_f, observation_count
 ```
 Conflict key: `(city, target_date, observed_at)`
 
-### UPDATE (WU data — metar-observer.js:333)
-```
-wu_high_f, wu_high_c, wu_observation_count
-```
-
-### Key column notes
-| Column | Type | Notes |
-|--------|------|-------|
-| `running_high_f/c` | numeric | Running daily maximum from METAR |
-| `wu_high_f/c` | numeric | Running daily maximum from Weather Underground API |
-| `observation_count` | integer | Number of METAR readings so far today |
-| `station_id` | text | ICAO station code (e.g., KLGA, KNYC) |
-| `target_date` | date | Local date for the observation |
-
 ---
 
 ## snapshots
@@ -282,11 +290,6 @@ Hourly market state snapshots for all city/date/platform combos.
 city, target_date, platform, ranges, forecast_temp,
 forecast_confidence, forecast_sources, depth_data
 ```
-
-| Column | Type | Notes |
-|--------|------|-------|
-| `ranges` | jsonb | Full range data (bid/ask/spread/volume per range) |
-| `depth_data` | jsonb | Order book depth at snapshot time |
 
 ---
 
@@ -333,17 +336,79 @@ metar_high_f, metar_high_c, match, diff_f
 ```
 Conflict key: `(city, station_id, target_date)`
 
+---
+
+## mv_refresh_log
+
+Tracks materialized view refresh performance. Written by resolver after each REFRESH CONCURRENTLY.
+
 | Column | Type | Notes |
 |--------|------|-------|
-| `match` | boolean | WU and METAR agree |
-| `diff_f` | numeric | WU - METAR difference in °F |
+| `view_name` | text | 'market_outcomes_mv', 'features_ml_mv', or 'performance_mv' |
+| `started_at` | timestamptz | When refresh started |
+| `finished_at` | timestamptz | When refresh completed |
+| `duration_ms` | numeric | Refresh duration in milliseconds |
+| `row_count` | bigint | Row count after refresh |
+| `success` | boolean | Whether refresh succeeded |
+| `error_message` | text | Error details on failure |
+
+---
+
+## Materialized Views
+
+All mviews are refreshed CONCURRENTLY after each resolution cycle (resolver.js `_refreshMaterializedViews`). Each has a unique index to support concurrent refresh.
+
+### market_outcomes_mv
+
+One row per unique resolved market (DISTINCT ON market_id). The deduplication layer that joins opportunities with market_resolutions. Picks the most recent scan for each market (latest created_at).
+
+- Source: `opportunities` LEFT JOIN `market_resolutions`
+- Filter: `action IN ('entered', 'filtered') AND side IN ('YES', 'NO')`
+- `would_have_won` is computed from market_resolutions.actual_temp + range bounds
+- Unique index: `(market_id)`
+
+### features_ml_mv
+
+ML training dataset. One row per resolved YES market with all features assembled. Read by `ml_win_predictor.py`.
+
+- Source: `market_outcomes_mv` LEFT JOIN `ensemble_spread`
+- Filter: `would_have_won IS NOT NULL AND side = 'YES' AND our_probability IS NOT NULL`
+- Includes: all scanner features + month + day_of_week + ECMWF member spread
+- Unique index: `(market_id)`
+
+### performance_mv
+
+P&L and win rate summary by key dimensions. For system health dashboards.
+
+- Source: `trades WHERE status = 'resolved'`
+- Grouped by: city, platform, range_type, side, entry_reason, price_tier, lead_time
+- Unique index: `(city, platform, range_type, side, entry_reason, price_tier, lead_time)`
 
 ---
 
 ## Quick Reference: Common Query Patterns
 
 ```sql
--- P&L summary
+-- P&L summary (from mview)
+SELECT city, platform, side, entry_reason, SUM(n) as n, SUM(wins) as wins,
+  ROUND(SUM(wins)::numeric / NULLIF(SUM(n), 0) * 100, 1) as win_pct,
+  SUM(total_pnl) as total_pnl
+FROM performance_mv
+GROUP BY city, platform, side, entry_reason ORDER BY total_pnl DESC;
+
+-- ML feature dataset
+SELECT COUNT(*), AVG(ask::float), AVG(hours_to_resolution::float)
+FROM features_ml_mv;
+
+-- Mview refresh health
+SELECT view_name,
+  COUNT(*) as refreshes,
+  ROUND(AVG(duration_ms)::numeric, 0) as avg_ms,
+  MAX(started_at) as last_refresh
+FROM mv_refresh_log WHERE success = true
+GROUP BY view_name ORDER BY view_name;
+
+-- P&L summary (from trades directly)
 SELECT platform, side, COUNT(*) as n,
   SUM(CASE WHEN won THEN 1 ELSE 0 END) as wins,
   ROUND(AVG(CASE WHEN won THEN 1.0 ELSE 0.0 END) * 100, 1) as win_pct,
@@ -370,25 +435,4 @@ FROM v2_forecast_accuracy
 WHERE source = 'ensemble_corrected'
   AND target_date > CURRENT_DATE - INTERVAL '21 days'
 GROUP BY city, unit ORDER BY mae DESC;
-
--- Model calibration check
-SELECT range_type, model_prob_bucket, n,
-  ROUND(avg_model_prob::numeric, 3) as model_prob,
-  ROUND(actual_win_rate::numeric, 3) as win_rate,
-  ROUND(correction_ratio::numeric, 3) as ratio
-FROM model_calibration
-WHERE n >= 30
-ORDER BY range_type, model_prob_bucket;
-
--- Backtest: would_have_won by price bucket
-SELECT
-  CASE WHEN ask < 0.2 THEN '<20c'
-       WHEN ask < 0.3 THEN '20-30c'
-       WHEN ask < 0.4 THEN '30-40c'
-       ELSE '40c+' END as bucket,
-  side, COUNT(*) as n,
-  ROUND(AVG(CASE WHEN would_have_won THEN 1.0 ELSE 0.0 END) * 100, 1) as win_pct
-FROM opportunities
-WHERE action = 'entered' AND would_have_won IS NOT NULL
-GROUP BY 1, side ORDER BY side, bucket;
 ```
