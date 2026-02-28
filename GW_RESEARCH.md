@@ -289,3 +289,56 @@ Risk: higher — temp might not actually cross. Use smaller position size.
 | **Total** | **+14-23** | **+$340-730** |
 
 Current baseline: ~2 trades/day, ~$42/day PnL.
+
+---
+
+## 7. PWS DATA COLLECTION RESULTS (2026-02-28)
+
+### Deployment Status
+PWS data collection deployed 2026-02-28 00:00 UTC. Bias correction framework added 01:00 UTC.
+**Data collection only — no GW detection changes, no trading logic changes.**
+
+### Coverage (78 stations across 27 cities)
+- **25 cities** × 3 stations, **phoenix** × 2, **seoul** × 1, **ankara** × 0
+- Station online rate: 58-61 stations per cycle (74-78%)
+
+### Key Findings (first ~70 min of data)
+
+**Station Reliability:**
+| Tier | Cities | Online % |
+|---|---|---|
+| 100% reliable | 15 cities (ATL, AUS, BA, CHI, DAL, LA, MPLS, NYC, OKC, PHX, SAO, SEA, SF, WLG, SP) | 100% |
+| Good (67-97%) | 6 cities (BOS, HOU, MIA, PHI, SA, VGS) | 67-97% |
+| Weak (34-59%) | 2 cities (DEN, DC) | 34-59% |
+| Dead | Seoul (0%), New Orleans (14%) | 0-14% |
+
+**Broken sensor detected:** KLAGRETN14 (New Orleans) reports -37°F vs 72°F METAR (diff=109). Sanity filter rejects it.
+
+**PWS vs METAR bias (structural, not noise):**
+| City | PWS-METAR Diff | Interpretation |
+|---|---|---|
+| Los Angeles | +8.7°F | Inland residential vs coastal airport |
+| San Francisco | +7.0°F | Same pattern — city heat vs fog-cooled SFO |
+| Chicago | -3.8°F | Residential shade vs runway heat island |
+| Philadelphia | -4.5°F | NJ station (10km) pulls median down |
+| Toronto | -2.4°C | Similar airport heat vs city |
+| Most US cities | ±1°F | Good agreement |
+
+**PWS freshness vs METAR:**
+- PWS median obs age: **14 seconds** (avg 36s)
+- METAR avg age: **963-4743 seconds** (16 min to 79 min)
+- **PWS is 40-300x fresher than METAR**
+
+### Bias Correction Framework
+- `pws_station_bias` table: per-station rolling bias (21-day window), stddev, distance to METAR
+- Resolver computes bias each cycle, observer loads cache every 30 min
+- Min 576 samples (~1 active day at 15s) before correction applied
+- Distance-weighted corrected median: `1/distance_km` weight for calibrated stations, 0.5 for warmup
+- `pws_corrected_median` + `pws_corrected_spread` written to `pws_observations` alongside raw values
+- Stations with abs(bias) > 20 auto-marked unreliable and excluded
+
+### Next Steps (after 2-3 days of data)
+1. Analyze per-station bias stability across time-of-day and weather conditions
+2. Check if distance is the right weighting (vs elevation, land use)
+3. Evaluate whether corrected PWS can detect boundary crossings 5-15 min before METAR
+4. If yes: integrate corrected PWS as early warning signal for GW detection
