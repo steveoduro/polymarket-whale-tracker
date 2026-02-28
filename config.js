@@ -200,7 +200,7 @@ const config = {
     chicago:       { lat: 41.8781, lon: -87.6298, tz: 'America/Chicago',       unit: 'F', nwsStation: 'KMDW', polymarketStation: 'KORD', wuCountry: 'US', kalshiBlocked: true, pwsStations: ['KILFRANK74', 'KILELMHU35', 'KILADDIS10'] },
     miami:         { lat: 25.7617, lon: -80.1918, tz: 'America/New_York',      unit: 'F', nwsStation: 'KMIA', polymarketStation: 'KMIA', wuCountry: 'US', kalshiBlocked: true, pwsStations: ['KFLWESTM8', 'KFLMIAMI232', 'KFLMIAMI1081'] },
     atlanta:       { lat: 33.7490, lon: -84.3880, tz: 'America/New_York',      unit: 'F', nwsStation: 'KATL', polymarketStation: 'KATL', wuCountry: 'US', pwsStations: ['KGAATLAN707', 'KGAATLAN628', 'KGAATLAN919'] },
-    dallas:        { lat: 32.7767, lon: -96.7970, tz: 'America/Chicago',       unit: 'F', nwsStation: 'KDAL', polymarketStation: 'KDAL', wuCountry: 'US', pwsStations: ['KTXSOUTH104', 'KTXIRVIN222', 'KTXEULES74'] },
+    dallas:        { lat: 32.7767, lon: -96.7970, tz: 'America/Chicago',       unit: 'F', nwsStation: 'KDFW', polymarketStation: 'KDAL', wuCountry: 'US', pwsStations: ['KTXSOUTH104', 'KTXIRVIN222', 'KTXEULES74'] },
     seattle:       { lat: 47.6062, lon: -122.3321, tz: 'America/Los_Angeles',  unit: 'F', nwsStation: 'KSEA', polymarketStation: 'KSEA', wuCountry: 'US', pwsStations: ['KWASEATT2605', 'KWASEATT2649', 'KWASEATT2336'] },
     denver:        { lat: 39.7392, lon: -104.9903, tz: 'America/Denver',       unit: 'F', nwsStation: 'KDEN', wuCountry: 'US', pwsStations: ['KCODENVE1305', 'KCODENVE1144', 'KCODENVE1541'] },
     austin:        { lat: 30.2672, lon: -97.7431, tz: 'America/Chicago',       unit: 'F', nwsStation: 'KAUS', wuCountry: 'US', kalshiNwsPriority: true, pwsStations: ['KTXAUSTI4026', 'KTXAUSTI3940', 'KTXAUSTI2291'] },
