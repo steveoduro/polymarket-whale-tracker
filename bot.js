@@ -66,6 +66,21 @@ class Bot {
     // Initialize dynamic per-city peak hours from METAR history
     await peakHours.initialize();
 
+    // Log PWS station coverage
+    const pwsCounts = {};
+    for (const [cityKey, cityConfig] of Object.entries(config.cities)) {
+      const n = (cityConfig.pwsStations || []).length;
+      pwsCounts[n] = (pwsCounts[n] || 0) + 1;
+    }
+    const pwsSummary = Object.entries(pwsCounts)
+      .sort((a, b) => b[0] - a[0])
+      .map(([n, count]) => `${count} ${count === 1 ? 'city' : 'cities'} x ${n} stations`)
+      .join(', ');
+    const zeroPws = Object.entries(config.cities)
+      .filter(([, c]) => !(c.pwsStations?.length))
+      .map(([k]) => k);
+    this._log('info', `PWS coverage: ${pwsSummary}${zeroPws.length ? ` (no PWS: ${zeroPws.join(', ')})` : ''}`);
+
     // Initialize executor bankrolls from existing open trades
     await this.executor.initBankrolls();
 
