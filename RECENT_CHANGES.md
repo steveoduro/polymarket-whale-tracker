@@ -1,10 +1,28 @@
 # Recent Changes Log
 
-Last updated: 2026-03-01 15:00 UTC
+Last updated: 2026-03-01 22:45 UTC
 
 ## Commits
 
-### (latest) — PWS GW bug fixes: bid, alerts, dedup
+### (latest) — Cap model calibration correction ratio
+
+**Date:** 2026-03-01
+
+The 0-5% unbounded bucket in `model_calibration` had a 12.6x correction ratio (model says 2.3%,
+actual win rate 29%). This inflated a Miami "75°F or below" YES from 3.6% raw → 46% corrected,
+creating false 35% edge. The trade entered at 11¢ with forecast 79.6°F — clearly wrong.
+
+Added `MAX_CORRECTION_RATIO: 3.0` in config. Both calibration paths in scanner now cap the ratio.
+With 3.0x cap: 3.6% × 3.0 = 10.9% → edge = -0.1% → correctly filtered.
+
+Edge trade record: 4W/30L (-$879). Most losses are boundary-adjacent bets where calibration
+inflated probabilities. The cap prevents the most egregious cases.
+
+**Files:** `config/trading.js`, `lib/scanner.js`
+
+---
+
+### Previous — PWS GW bug fixes: bid, alerts, dedup
 
 **Date:** 2026-03-01
 
@@ -16,7 +34,6 @@ Five fixes to the PWS guaranteed-win pipeline:
 2. **All alerts now immediate**: `tradeEntry`, `tradeExit`, `tradeResolved`, and `error` switched
    from queued `this.action()` to `this.sendNow()`. GW trades execute during fast polls between
    scan cycles — queued alerts were lost on PM2 restart before the next cycle could flush them.
-   (Paris 12°C PWS trade executed at 73¢ but user never saw the trade notification.)
 
 3. **PWS position dedup**: After PM2 restart, in-memory `_pwsGwDedup` clears → PWS re-detects
    crossings → false "Executing..." alerts fire before executor's DB dedup blocks them.
@@ -47,44 +64,13 @@ Polymarket unaffected — WU historical data is final at midnight.
 
 ---
 
-### Previous — Detect unbounded lower NO ranges in GW entry
-
-**Date:** 2026-03-01
-
-Ranges like "57°F or below" (rangeMin=null, rangeMax=57.5) were never detected as GW
-entry opportunities. Both `_checkPwsGW()` and `evaluateGWFastPath()` only handled
-unbounded upper YES and bounded NO. The monitor's `_checkAlreadyDecided()` already
-handled these correctly for existing positions — only the entry path was missing.
-
-**Files:** `lib/metar-observer.js`, `lib/scanner.js`
-
----
-
-### Previous — Fix PWS GW eligibility metric + corrected median calculation
-
-**Date:** 2026-03-01
-
-Two fixes to PWS guaranteed-win accuracy:
-
-1. **GW-hour eligibility filter**: `_loadPwsAvgErrorCache()` now filters to 10am-4pm local time
-   per city timezone (was all-day average). Seattle's all-day error (1.71°F) masked a 2.88°F
-   GW-hour error — now correctly blocked.
-
-2. **True median replaces weighted average**: `pws_corrected_median` was actually a
-   distance-weighted mean. With 3 stations, an outlier pulled the average. Now uses a true
-   median — with 3 stations the outlier is discarded.
-
-**Files:** `lib/metar-observer.js`
-
----
-
-## Post-Deployment Logs (2026-03-01 14:57 UTC)
+## Post-Deployment Logs (2026-03-01 22:45 UTC)
 
 ```
-PWS avg error cache loaded: 25 cities, 12 eligible: buenos aires(1.38), chicago(0.92),
-  dallas(1.33), dc(1.54), london(0.6), miami(1.75), minneapolis(1.71), nyc(1.68),
-  paris(1.18), sao paulo(1.06), toronto(1.45), wellington(0.79)
-Scan complete: 55 markets, 1 approved, 657 filtered
-Evaluating 9 open positions, 0 exits, 9 holds
-GW confirmed: seoul 11°C, london 12°C, paris 12°C
+PWS avg error cache loaded: 26 cities, 9 eligible: buenos aires(1.25), chicago(0.84),
+  dallas(1.3), london(0.6), nyc(1.18), paris(1.18), sao paulo(0.93), toronto(1.32),
+  wellington(0.77)
+Scan complete: 67 markets, 0 approved, 740 filtered
+Evaluating 18 open positions, 0 exits, 18 holds
+PWS GW: 8 eligible cities, 0 crossings detected
 ```

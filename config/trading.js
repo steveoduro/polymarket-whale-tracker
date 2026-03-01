@@ -24,6 +24,7 @@ module.exports = {
     CAL_BLOCKS_MIN_N: 15,
     CAL_CONFIRMS_MIN_N: 50,
     CAL_MIN_TRADE_EDGE: 0.03,
+    MAX_CORRECTION_RATIO: 3.0,   // cap model calibration correction — 0-5% unbounded bucket has 12.6x
   },
 
   sizing: {
