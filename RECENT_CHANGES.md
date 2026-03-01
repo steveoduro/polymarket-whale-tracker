@@ -4,7 +4,20 @@ Last updated: 2026-03-01 05:40 UTC
 
 ## Commits
 
-### (latest) — Fix PWS GW eligibility metric + corrected median calculation
+### (latest) — Detect unbounded lower NO ranges in GW entry
+
+**Date:** 2026-03-01
+
+Ranges like "57°F or below" (rangeMin=null, rangeMax=57.5) were never detected as GW
+entry opportunities. Both `_checkPwsGW()` and `evaluateGWFastPath()` only handled
+unbounded upper YES and bounded NO. The monitor's `_checkAlreadyDecided()` already
+handled these correctly for existing positions — only the entry path was missing.
+
+**Files:** `lib/metar-observer.js`, `lib/scanner.js`
+
+---
+
+### Previous — Fix PWS GW eligibility metric + corrected median calculation
 
 **Date:** 2026-03-01
 
