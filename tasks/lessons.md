@@ -359,6 +359,15 @@
 - Fix: fetch both stations in batch, route each station's temp to correct platform's ranges
 - Only NYC affected today (Chicago has `kalshiBlocked: true`), but future-proof for unblocking
 
+## PWS Station Reliability (Mar 1, 2026)
+- **Overall stddev is misleading for PWS stations**: High overall stddev is driven by predictable diurnal (solar radiation) patterns, NOT random noise. Phoenix has 22°F day/night swing but within any single hour, stddev is 0.5-3.1°F.
+- **Stddev threshold must be generous**: 2.0°F would kill 82% of °F stations. 5.0°F catches only the 9 genuinely bad stations (extreme diurnal patterns that defeat flat bias correction).
+- **Flat bias correction fails at midday for diurnal stations**: Austin flat bias = +1.7°F, but actual noon bias is negative. Correcting by +1.7 makes readings WORSE. Future fix: hour-of-day bias buckets.
+- **running_high_f carries from previous day**: `running_high_f` in `metar_observations` persists until today's temps exceed it. Chicago showed 43°F running_high all day when actual max was 35°F. Don't use it as "actual high" for accuracy analysis — use `MAX(temp_f)` from hourly observations or wait for WU/CLI resolution.
+- **PWS overshoot correlates with reliability flag**: Cities with all-reliable stations naturally have <=2°F corrected overshoot. Cities with unreliable stations (Denver, Phoenix, Seattle, Vegas, LA) have 5°+ overshoot.
+- **Snapshot-based analysis != market reality**: Simulated crossings against snapshot ranges include cities with no active markets, markets with no volume, untradeable prices. Always validate accuracy claims against actual `opportunities` table entries.
+- **PWS undershoot is not dangerous but not useful**: OKC corrected median reads -2.2°F below actual METAR high. No false positive risk, but no early detection value either.
+
 ---
 
 *Add new lessons as discovered from paper trading and live trading.*
