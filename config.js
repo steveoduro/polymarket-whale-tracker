@@ -1,231 +1,38 @@
 /**
- * Central configuration — all tunable parameters in one place.
- * Nothing hardcoded in module logic.
+ * Central configuration — loads sub-configs and merges into one object.
+ * All consumer code still does require('./config') or require('../config').
  */
 
 require('dotenv').config();
 
+const cities = require('./config/cities');
+const trading = require('./config/trading');
+const forecasts = require('./config/forecasts');
+const platforms = require('./config/platforms');
+const observation = require('./config/observation');
+
 const config = {
-  // ── General ──────────────────────────────────────────────────────
   general: {
     SCAN_INTERVAL_MINUTES: 5,
-    TRADING_MODE: 'paper',              // 'paper' | 'shadow' | 'live'
+    TRADING_MODE: 'paper',
   },
 
-  // ── Entry ────────────────────────────────────────────────────────
-  entry: {
-    MIN_EDGE_PCT: 10,                   // minimum edge % to enter
-    MAX_SPREAD: 0.15,                   // hard spread cap in dollars
-    MAX_SPREAD_PCT: 0.50,              // reject if spread > 50% of ask price
-    MIN_ASK_PRICE: 0.10,               // skip YES trades below 10¢ (ghost markets)
-    MIN_NO_ASK_PRICE: 0.20,            // NO-side floor — only 20-30¢ bucket is profitable (71.4% win rate)
-    MAX_NO_ASK_PRICE: 0.30,            // NO-side cap — >30¢ bucket has 16.7% win rate, -$373 P&L
-    MIN_HOURS_TO_RESOLUTION: 8,        // don't bet on already-known outcomes
-    MAX_MODEL_MARKET_RATIO: 3.0,       // reject if model prob > 3x market price (temporary guardrail)
-    YES_CANDIDATE_COUNT: 5,            // number of YES candidate ranges to evaluate per city/date
-    YES_MAX_FORECAST_DISTANCE: 3.0,    // candidates within this many stddevs of forecast
-    MAX_ENSEMBLE_SPREAD_F: 7.0,        // max source disagreement in °F — conservative start
-    MAX_ENSEMBLE_SPREAD_C: 4.0,        // max source disagreement in °C
-    MAX_STD_RANGE_RATIO: 2.0,          // block bounded YES if std_dev (market unit) > 2x range_width
-    MAX_MARKET_DIVERGENCE_C: 1.0,     // block YES if model-vs-market temp divergence > 1°C (all profit comes from <1°C agreement)
-  },
-
-  // ── Calibration Thresholds ─────────────────────────────────────
-  calibration: {
-    CAL_BLOCKS_MIN_N: 15,        // minimum n (unique markets) for calBlocksEdge (blocking negative-edge buckets)
-    CAL_CONFIRMS_MIN_N: 50,      // minimum n for calConfirmsEdge, Kelly override, hold override
-    CAL_MIN_TRADE_EDGE: 0.03,    // minimum (empirical_win_rate - ask) gap for calConfirmsEdge (3pp)
-  },
-
-  // ── Position Sizing ──────────────────────────────────────────────
-  sizing: {
-    KELLY_FRACTION: 0.5,
-    YES_BANKROLL: 1000,
-    NO_BANKROLL: 1000,
-    NO_MAX_PER_DATE: 200,               // hard cap on NO exposure per resolution date
-    MAX_BANKROLL_PCT: 0.20,             // hard cap per position as % of bankroll
-    MIN_BET: 10,
-    MAX_VOLUME_PCT: 25,                 // cap position at 25% of visible volume
-    HARD_REJECT_VOLUME_PCT: 75,         // hard-reject trades > 75% of visible volume
-    WARN_VOLUME_PCT: 50,                // flag trades > 50% of volume in alerts
-  },
-
-  // ── Exit ─────────────────────────────────────────────────────────
-  exit: {
-    EVALUATOR_MODE: 'log_only',         // 'log_only' | 'active' (applies to signals NOT in ACTIVE_SIGNALS)
-    ACTIVE_SIGNALS: ['guaranteed_loss', 'guaranteed_win'],  // these signal types always execute regardless of EVALUATOR_MODE
-    TAKE_PROFIT: {
-      OBSERVATION_SPIKE: {
-        ENABLED: true,                  // detect unconfirmed bid spikes on YES unbounded upper
-        TRIGGER_BID: 0.50,              // bid must be above this to trigger
-        MODE: 'log_only',              // 'log_only' | 'active' — promote after 3-5 days of validated signals
-      },
-    },
-  },
-
-  // ── Forecasts ────────────────────────────────────────────────────
-  forecasts: {
-    CACHE_MINUTES: 15,
-    CALIBRATION_WINDOW_DAYS: 21,        // rolling window for bias/std dev calibration (seasonal adaptation)
-    MIN_CITY_STDDEV_SAMPLES: 20,       // minimum samples for per-city std dev (falls back to pooled)
-    LEAD_TIME_BUCKETS: [               // lead-time bias bucketing (narrowed from audit data)
-      { name: 'near', min: 0, max: 6 },            // 0-6h — at/near resolution
-      { name: 'same-day', min: 7, max: 24 },       // 7-24h — same day
-      { name: 'next-day', min: 25, max: 48 },      // 25-48h — next day
-      { name: 'multi-day', min: 49, max: Infinity }, // 49h+ — 2+ days out
-    ],
-    DEFAULT_STD_DEVS: {                 // FALLBACK ONLY — used until empirical std devs accumulate (≥10 data points/unit)
-      'very-high': 1.39,               // ~2.5°F — sources agree within 1°F
-      'high': 1.67,                     // ~3.0°F — sources agree within 2°F
-      'medium': 2.22,                   // ~4.0°F — sources agree within 4°F
-      'low': 2.78,                      // ~5.0°F — large disagreement or single source
-    },
-    CITY_ELIGIBILITY: {                 // Block trades in cities where forecast MAE is too high for the range type
-      BOUNDED_MAX_MAE_F: 1.8,          // was 2.5 — backtest shows profitability requires ≤1.8
-      BOUNDED_MAX_MAE_C: 1.0,          // was 1.5 — equivalent tightening for °C cities
-      UNBOUNDED_MAX_MAE_F: 2.7,        // was 4.0 — unbounded more forgiving but 4.0 was extreme
-      UNBOUNDED_MAX_MAE_C: 1.5,        // was 2.0
-      MIN_SAMPLES: 5,                   // minimum accuracy records before gating (below this, allow all)
-      PREFER_ENSEMBLE_MAE: true,       // use corrected ensemble MAE when available, fallback to per-source residual MAE
-    },
-    ENSEMBLE_SPREAD: {
-      ENABLED: false,          // flip to true after 7-10 days of baseline
-      MIN_BASELINE_DAYS: 7,
-      MULTIPLIER_FLOOR: 0.5,
-      MULTIPLIER_CEILING: 2.0,
-    },
-    MOS: {
-      SHADOW_ONLY: true,       // flip to false to promote to active ensemble member
-    },
-    SOURCE_MANAGEMENT: {                // Per-city source promotion/demotion thresholds
-      DEMOTION_MAE_F: 4.0,             // absolute ceiling — always demote above this (°F)
-      DEMOTION_MAE_C: 2.0,             // absolute ceiling — always demote above this (°C)
-      RELATIVE_DEMOTION_FACTOR: 1.8,   // demote if MAE > 1.8x best source for that city
-      SOFT_DEMOTION_MAX_WEIGHT: 0.10,  // max weight for soft-demoted sources (10%) — used when MIN_ACTIVE prevents full demotion
-      MIN_SAMPLES: 7,                   // minimum records before demoting (higher bar — one bad week shouldn't kill a source)
-      MIN_ACTIVE_SOURCES: 2,            // never fully demote below this many active sources (soft demotion still applies)
-      WEIGHT_MIN_SAMPLES: 3,            // minimum records before weighting (lowered from 5 to activate with existing data)
-    },
-  },
-
-  // ── Snapshots ────────────────────────────────────────────────────
-  snapshots: {
-    INTERVAL_MINUTES: 60,
-  },
-
-  // ── Alerts ───────────────────────────────────────────────────────
   alerts: {
     TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
     ACTIONS_CHAT_ID: process.env.TELEGRAM_ACTIONS_CHAT_ID || process.env.TELEGRAM_CHAT_ID,
     INFO_CHAT_ID: process.env.TELEGRAM_INFO_CHAT_ID || process.env.TELEGRAM_CHAT_ID,
   },
 
-  // ── Platforms ────────────────────────────────────────────────────
-  platforms: {
-    polymarket: {
-      enabled: true,
-      guaranteedWinEnabled: true,             // METAR guaranteed wins — on
-      feeRate: 0,                             // Weather markets: zero trading fees (3.15% only applies to 15-min crypto)
-      gammaUrl: 'https://gamma-api.polymarket.com',
-      clobUrl: 'https://clob.polymarket.com',
-      apiKey: process.env.POLY_API_KEY,
-      apiSecret: process.env.POLY_API_SECRET,
-      apiPassphrase: process.env.POLY_API_PASSPHRASE,
-      funderAddress: process.env.POLY_FUNDER_ADDRESS,  // proxy wallet (0xFCa1...)
-    },
-    kalshi: {
-      enabled: true,                                // keep true — scanner still logs for calibration
-      tradingEnabled: false,                        // edge-based trades — still off
-      guaranteedWinEnabled: true,                   // METAR guaranteed wins — on
-      feeRate: 0,                             // Legacy flat rate (unused) — see takerFeeMultiplier
-      takerFeeMultiplier: 0.07,               // Actual fee: 0.07 * P * (1-P) per contract, charged at entry only
-      apiUrl: 'https://api.elections.kalshi.com/trade-api/v2',
-      apiKey: process.env.KALSHI_API_KEY,
-      privateKeyPath: process.env.KALSHI_PRIVATE_KEY_PATH,
-      STD_DEV_MULTIPLIER: 1.8,               // Widen probability distribution for Kalshi — NWS CLI adds uncertainty vs WU
-      NWS_WEIGHT_BOOST: 3.0,                 // Multiply NWS inverse-MAE weight by 3x for Kalshi ensemble (NWS is resolution source)
-    },
+  snapshots: {
+    INTERVAL_MINUTES: 60,
   },
 
-  // ── Guaranteed Entry ─────────────────────────────────────────────
-  guaranteed_entry: {
-    ENABLED: true,
-    MIN_MARGIN_CENTS: 5,              // minimum profit per share after fees (cents)
-    MAX_ASK: 0.97,                    // don't buy above 97¢
-    MIN_ASK: 0.30,                    // safety floor — if ask < 30¢, observation might be wrong
-    MIN_ASK_DUAL_CONFIRMED: 0.15,    // lower floor for dual-confirmed entries (both WU + METAR agree)
-    MAX_BANKROLL_PCT: 0.20,           // 20% of matching-side bankroll per guaranteed-win trade
-    REQUIRE_DUAL_CONFIRMATION: false, // METAR-first mode: METAR triggers, WU optional confirmation
-    GW_SCAN_INTERVAL_SECONDS: 90,    // independent scan timer (decoupled from observer)
-    METAR_FAST_POLL_INTERVAL_SECONDS: 15,   // fast-poll loop interval (batch poll takes 10-18s with 28 cities)
-    METAR_ONLY_MIN_GAP_F: 0.5,            // min gap (°F) above threshold for METAR-only entry (Polymarket)
-    METAR_ONLY_MIN_GAP_C: 0.5,            // min gap (°C) above threshold for METAR-only entry (Polymarket)
-    GW_NEAR_THRESHOLD_BUFFER_F: 1.0,      // fast poll: only process cities within this buffer of a GW boundary (°F)
-    GW_NEAR_THRESHOLD_BUFFER_C: 0.5,      // fast poll: only process cities within this buffer of a GW boundary (°C)
-    GW_MIN_BID: 0.10,                         // market sanity: don't enter if bid < 10¢ (market disagrees with signal)
-    GW_LIVE_ENABLED: false,                 // kill switch — flip to true when ready to go live
-    GW_METAR_BANKROLL: 10,                  // live pool ($10 test)
-    GW_PAPER_BANKROLL: 1000,                // paper simulation continues at $1000
-  },
+  ...trading,      // { entry, calibration, sizing, exit }
+  ...forecasts,    // { forecasts: {...} }
+  ...platforms,    // { platforms: {...} }
+  ...observation,  // { guaranteed_entry, observer, observation_entry_gate, pws_gw }
 
-  // ── Observer ─────────────────────────────────────────────────────
-  observer: {
-    POLL_INTERVAL_MINUTES: 10,     // how often to poll METAR observations
-    PEAK_POLL_INTERVAL_MINUTES: 3, // tighter polling during peak hours (any city in 10-18 local)
-    PEAK_HOURS: { start: 10, end: 18 },  // local time window for peak polling
-    ACTIVE_HOURS: { start: 6, end: 23 },  // local time range to poll (skip overnight)
-    COOLING_HOUR: 17,              // fallback default if no METAR history (5 PM)
-    DYNAMIC_PEAK_HOUR: true,       // enable per-city peak hour from METAR data
-    PEAK_HOUR_BUFFER: 2,           // hours after observed average peak = cooling hour
-    PEAK_HOUR_MIN: 14,             // floor clamp (2 PM — no city peaks before this)
-    PEAK_HOUR_MAX: 20,             // ceiling clamp (8 PM — safety upper bound)
-    PEAK_HOUR_MIN_SAMPLES: 3,      // minimum peak observations before trusting dynamic value
-    WU_LEAD_MIN_GAP_F: 1.0,        // minimum WU-METAR gap in °F to log as WU-leads event (was 2.5 — only 1/29 exceeded)
-    WU_LEAD_MIN_GAP_C: 0.5,        // minimum WU-METAR gap in °C to log as WU-leads event (was 1.5)
-    WU_LEAD_MAX_LOCAL_HOUR: 14,     // check WU-leads through 2pm (was 12 — captures 12-2pm rising phase)
-  },
-
-  // ── Observation Entry Gate ──────────────────────────────────────
-  observation_entry_gate: {
-    ENABLED: true,
-    BOUNDARY_BUFFER_F: 1.0,  // Block if running high is within 1°F of range ceiling
-    BOUNDARY_BUFFER_C: 0.5,  // Block if running high is within 0.5°C of range ceiling
-  },
-
-  // ── Cities ───────────────────────────────────────────────────────
-  // All cities from both platforms. Easy to add/remove.
-  // wuCountry: ISO 2-letter country code for Weather Underground API (STATION:9:COUNTRY)
-  cities: {
-    nyc:           { lat: 40.7128, lon: -74.0060, tz: 'America/New_York',      unit: 'F', nwsStation: 'KNYC', polymarketStation: 'KLGA', wuCountry: 'US', kalshiNwsPriority: true, pwsStations: ['KNYREGOP4', 'KNYNEWYO1313', 'KNYNEWYO2206'] },
-    chicago:       { lat: 41.8781, lon: -87.6298, tz: 'America/Chicago',       unit: 'F', nwsStation: 'KMDW', polymarketStation: 'KORD', wuCountry: 'US', kalshiBlocked: true, pwsStations: ['KILFRANK74', 'KILELMHU35', 'KILADDIS10'] },
-    miami:         { lat: 25.7617, lon: -80.1918, tz: 'America/New_York',      unit: 'F', nwsStation: 'KMIA', polymarketStation: 'KMIA', wuCountry: 'US', kalshiBlocked: true, pwsStations: ['KFLWESTM8', 'KFLMIAMI232', 'KFLMIAMI1081'] },
-    atlanta:       { lat: 33.7490, lon: -84.3880, tz: 'America/New_York',      unit: 'F', nwsStation: 'KATL', polymarketStation: 'KATL', wuCountry: 'US', pwsStations: ['KGAATLAN707', 'KGAATLAN628', 'KGAATLAN919'] },
-    dallas:        { lat: 32.7767, lon: -96.7970, tz: 'America/Chicago',       unit: 'F', nwsStation: 'KDFW', polymarketStation: 'KDAL', wuCountry: 'US', pwsStations: ['KTXSOUTH104', 'KTXIRVIN222', 'KTXEULES74'] },
-    seattle:       { lat: 47.6062, lon: -122.3321, tz: 'America/Los_Angeles',  unit: 'F', nwsStation: 'KSEA', polymarketStation: 'KSEA', wuCountry: 'US', pwsStations: ['KWASEATT2605', 'KWASEATT2649', 'KWASEATT2336'] },
-    denver:        { lat: 39.7392, lon: -104.9903, tz: 'America/Denver',       unit: 'F', nwsStation: 'KDEN', wuCountry: 'US', pwsStations: ['KCODENVE1305', 'KCODENVE1144', 'KCODENVE1541'] },
-    austin:        { lat: 30.2672, lon: -97.7431, tz: 'America/Chicago',       unit: 'F', nwsStation: 'KAUS', wuCountry: 'US', kalshiNwsPriority: true, pwsStations: ['KTXAUSTI4026', 'KTXAUSTI3940', 'KTXAUSTI2291'] },
-    houston:       { lat: 29.7604, lon: -95.3698, tz: 'America/Chicago',       unit: 'F', nwsStation: 'KHOU', wuCountry: 'US', pwsStations: ['KTXHOUST3045', 'KTXHOUST275', 'KTXHOUST3203'] },
-    philadelphia:  { lat: 39.9526, lon: -75.1652, tz: 'America/New_York',      unit: 'F', nwsStation: 'KPHL', wuCountry: 'US', pwsStations: ['KPAPHILA367', 'KPAPHILA508', 'KNJHADDO33'] },
-    dc:            { lat: 38.9072, lon: -77.0369, tz: 'America/New_York',      unit: 'F', nwsStation: 'KDCA', wuCountry: 'US', pwsStations: ['KDCWASHI468', 'KDCWASHI286', 'KDCWASHI600'] },
-    vegas:         { lat: 36.1699, lon: -115.1398, tz: 'America/Los_Angeles',  unit: 'F', nwsStation: 'KLAS', wuCountry: 'US', pwsStations: ['KNVLASVE1650', 'KNVLASVE932', 'KNVNORTH120'] },
-    'new orleans': { lat: 29.9511, lon: -90.0715, tz: 'America/Chicago',       unit: 'F', nwsStation: 'KMSY', wuCountry: 'US', pwsStations: ['KLANEWOR292', 'KLAGRETN14', 'KLANEWOR490'] },
-    'san francisco': { lat: 37.7749, lon: -122.4194, tz: 'America/Los_Angeles', unit: 'F', nwsStation: 'KSFO', wuCountry: 'US', pwsStations: ['KCASANFR1771', 'KCASANFR2206', 'KCASANFR698'] },
-    'los angeles': { lat: 34.0522, lon: -118.2437, tz: 'America/Los_Angeles',  unit: 'F', nwsStation: 'KLAX', wuCountry: 'US', kalshiNwsPriority: true, pwsStations: ['KCALOSAN1311', 'KCAGLEND125', 'KCALOSAN815'] },
-    phoenix:       { lat: 33.4484, lon: -112.0740, tz: 'America/Phoenix',      unit: 'F', nwsStation: 'KPHX', wuCountry: 'US', pwsStations: ['KAZPHOEN1864', 'KAZLAVEE24'] },
-    boston:         { lat: 42.3601, lon: -71.0589, tz: 'America/New_York',      unit: 'F', nwsStation: 'KBOS', wuCountry: 'US', pwsStations: ['KMABOSTO331', 'KMAJAMAI25', 'KMASOMER98'] },
-    london:        { lat: 51.5074, lon: -0.1278, tz: 'Europe/London',          unit: 'C', polymarketStation: 'EGLC', wuCountry: 'GB', pwsStations: ['ILONDO915', 'ILONDO657', 'ILONDO609'] },
-    seoul:         { lat: 37.5665, lon: 126.9780, tz: 'Asia/Seoul',            unit: 'C', polymarketStation: 'RKSI', wuCountry: 'KR', pwsStations: ['IYONGS9'] },
-    toronto:       { lat: 43.6532, lon: -79.3832, tz: 'America/Toronto',       unit: 'C', polymarketStation: 'CYYZ', wuCountry: 'CA', pwsStations: ['ITORON152', 'ITORONTO313', 'ITORON207'] },
-    'buenos aires': { lat: -34.6037, lon: -58.3816, tz: 'America/Argentina/Buenos_Aires', unit: 'C', polymarketStation: 'SAEZ', wuCountry: 'AR', pwsStations: ['ICOMUNA131', 'IBUENO123', 'ICOMUN123'] },
-    ankara:        { lat: 39.9334, lon: 32.8597, tz: 'Europe/Istanbul',        unit: 'C', polymarketStation: 'LTAC', wuCountry: 'TR', pwsStations: [] },
-    wellington:    { lat: -41.2865, lon: 174.7762, tz: 'Pacific/Auckland',     unit: 'C', polymarketStation: 'NZWN', wuCountry: 'NZ', pwsStations: ['IWELLI407', 'IWELLI522', 'IWELLI36'] },
-    paris:         { lat: 48.8566, lon: 2.3522, tz: 'Europe/Paris',          unit: 'C', polymarketStation: 'LFPG', wuCountry: 'FR', pwsStations: ['IPARIS18258', 'IPARIS18247', 'IMALAKOF172'] },
-    'sao paulo':   { lat: -23.5505, lon: -46.6333, tz: 'America/Sao_Paulo',  unit: 'C', polymarketStation: 'SBGR', wuCountry: 'BR', pwsStations: ['ISOPAU318', 'ISOPAU288', 'ISOPAULO494'] },
-    'san antonio': { lat: 29.4241, lon: -98.4936, tz: 'America/Chicago',      unit: 'F', nwsStation: 'KSAT', wuCountry: 'US', pwsStations: ['KTXSANAN2786', 'KTXSANAN3718', 'KTXSANAN2533'] },
-    minneapolis:   { lat: 44.9778, lon: -93.2650, tz: 'America/Chicago',      unit: 'F', nwsStation: 'KMSP', wuCountry: 'US', pwsStations: ['KMNMINNE514', 'KMNMINNE644', 'KMNMINNE423'] },
-    'oklahoma city': { lat: 35.4676, lon: -97.5164, tz: 'America/Chicago',    unit: 'F', nwsStation: 'KOKC', wuCountry: 'US', pwsStations: ['KOKMIDWE27', 'KOKMIDWE53', 'KOKOKLAH944'] },
-  },
-
+  cities,
 };
 
 module.exports = config;

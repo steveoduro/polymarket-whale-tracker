@@ -1,93 +1,70 @@
 # Recent Changes Log
 
-Last updated: 2026-02-28 07:20 UTC
+Last updated: 2026-03-01 02:20 UTC
 
 ## Commits
 
-### (latest) — Fix Dallas Kalshi station: KDAL → KDFW
+### (latest) — Config reorganization + PWS GW strategy
+
+**Date:** 2026-03-01
+
+**Task 1: Config Reorganization**
+- Split monolithic `config.js` into organized sub-files under `config/`:
+  - `config/cities.js` — 28 city definitions, reformatted 1-field-per-line, grouped by region
+  - `config/trading.js` — entry, calibration, sizing, exit
+  - `config/forecasts.js` — forecast engine params
+  - `config/platforms.js` — Polymarket + Kalshi configs
+  - `config/observation.js` — guaranteed_entry, observer, observation_entry_gate, pws_gw
+- `config.js` is now a ~35 line loader that merges sub-configs
+- Zero consumer changes — all `require('./config')` calls see the same object shape
+
+**Task 2: PWS Guaranteed-Win Strategy**
+- New 3rd entry strategy alongside forecast-based edge trading and METAR GW
+- PWS corrected median detects boundary crossings earlier than METAR (80-300 min lead)
+- 12 eligible cities (avg corrected error ≤2.0°): London, Toronto, Paris, Wellington, Minneapolis, Buenos Aires, Sao Paulo, Chicago, DC, Seattle, Dallas, Miami
+- Runtime eligibility check (not hardcoded): min stations, online count, avg error, calibration
+- Independent from METAR — both can enter the same market for head-to-head comparison
+- Separate $500 paper bankroll, 15% max per position
+- Config: `pws_gw` section with all thresholds
+
+**Files:**
+- `config.js` (rewritten as loader)
+- `config/cities.js`, `config/trading.js`, `config/forecasts.js`, `config/platforms.js`, `config/observation.js` (NEW)
+- `lib/metar-observer.js` — `_checkPwsGW()` method, `_loadPwsAvgErrorCache()`, integrated into `metarFastPoll()` step 6.5
+- `lib/scanner.js` — `evaluateGWFastPath()` updated for PWS thresholds + entry_reason
+- `lib/executor.js` — PWS bankroll tracking, entry_reason-based dedup, PWS-specific sizing
+- `lib/alerts.js` — PWS-specific alert formatting (📡 emoji, PWS corrected median display)
+
+---
+
+### Previous — Fix Dallas Kalshi station: KDAL → KDFW
 
 **Date:** 2026-02-28
-
-**Root cause:** KDAL (Love Field) doesn't publish NWS CLI reports — zero records in IEM for 2026. Kalshi resolves via NWS CLI at KDFW (DFW Airport). Confirmed by matching KDFW CLI highs against Kalshi settlement values (Feb 23-26: exact match).
-
-**Impact:** Dallas GW trade (NO 80-81°) lost because METAR at KDAL showed 82°F but KDFW CLI = 81°F. The 1°F discrepancy (WU sub-hourly peak vs CLI hourly) crossed the boundary. Trade genuinely lost — not a resolver bug.
-
-**Changes:**
-- Config: Dallas `nwsStation` changed from `KDAL` to `KDFW`
-- Resolver: Added `KDFW` to METAR_COORDS lookup map
-- DB: Fixed accuracy records — Feb 25 actual corrected from 81→82 (KDFW CLI), all station refs updated to KDFW
-
-**Verification:** All 20 Kalshi stations checked — KDAL is the ONLY one missing CLI data.
 
 Files: `config.js`, `lib/resolver.js`
 
 ---
 
-### f4bb2e0 — Fix Kalshi premature resolution via Open-Meteo fallback
-
-**Date:** 2026-02-28
-
-**Changes:**
-- Open-Meteo historical fallback now gated for Kalshi trades < 3 days old (skip fallback, wait for CLI)
-- Prevents Open-Meteo (which can differ from CLI by 1-2°F) from resolving Kalshi trades prematurely
-
-Files: `lib/resolver.js`
-
----
-
-### de8947e — Fix PWS distance calculation: use actual METAR station coords
-
-**Date:** 2026-02-28
-
-**Changes:**
-- Added METAR_COORDS lookup with actual airport coordinates for all 30 ICAO stations
-- Distance calculation now uses airport coords instead of city center
-
-Files: `lib/resolver.js`
-
----
-
-### 7d07830 — PWS bias correction framework (data collection only)
-
-**Date:** 2026-02-28
-
-**Changes:**
-- pws_station_bias table, resolver bias computation, observer bias cache + corrected median
-- NO changes to GW detection or trading logic
-
-Files: `lib/resolver.js`, `lib/metar-observer.js`, DB migration
-
----
-
-### 75a529c — PWS data collection integration
-
-**Date:** 2026-02-28
-
-Files: `config.js`, `lib/metar-observer.js`, `bot.js`, DB migration
-
----
-
-## Post-Deployment Logs (2026-02-28 07:20 UTC)
+## Post-Deployment Logs (2026-03-01 02:20 UTC)
 
 ```
-Bot running with KDFW fix for Dallas Kalshi
+Bot restarted with config split + PWS GW strategy.
 
-Cycle #1 complete in 96.0s:
-  Markets scanned: 46
-  Opportunities: 546 logged, 0 approved, 546 filtered
-  Trades: 0 entered, 0 resolved
-  Backfilled: 200 opportunities
-  Monitor: 2 positions (seoul NO 12°C GW held)
+Startup verification:
+  Config: 14 keys, 28 cities — all values preserved
+  Bankrolls: YES $977.90 / NO $1000.00 / GW Live $10.00 / GW Paper $604.85 / PWS GW $500.00
+  PWS coverage: 25 cities x 3 stations, 1 x 2, 1 x 1, 1 x 0 (ankara)
+  7 open trades
 
-Resolver:
-  PWS station bias: 70 stations, 0 unreliable
-  CLI vs NWS obs mismatches (expected 1°F): seattle, philly, dc, vegas, nyc, sf, minneapolis
-  Model calibration refreshed
+Fast poll running:
+  23 cities polled, 47-48 PWS stations online
+  0 GW detections (overnight — expected)
+  PWS data collection: 23 rows/cycle
 
-Fast poll:
-  5 international cities active (london, seoul, ankara, wellington, paris)
-  PWS: 4 cities, 8 stations online
-  WU: 5/5 responses
+PWS GW eligible cities (12):
+  london(0.68), toronto(1.00), wellington(1.10), paris(1.10),
+  minneapolis(1.23), buenos aires(1.25), sao paulo(1.51),
+  chicago(1.66), dc(1.72), seattle(1.74), dallas(1.90), miami(1.93)
 
 Empty error log.
 ```
