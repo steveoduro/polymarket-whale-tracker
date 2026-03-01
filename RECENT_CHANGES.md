@@ -1,10 +1,33 @@
 # Recent Changes Log
 
-Last updated: 2026-03-01 03:40 UTC
+Last updated: 2026-03-01 05:40 UTC
 
 ## Commits
 
-### (latest) — Replace 8 dead/broken PWS stations across 8 cities
+### (latest) — Fix PWS GW eligibility metric + corrected median calculation
+
+**Date:** 2026-03-01
+
+Two fixes to PWS guaranteed-win accuracy:
+
+1. **GW-hour eligibility filter**: `_loadPwsAvgErrorCache()` now filters to 10am-4pm local time
+   per city timezone (was all-day average). Seattle's all-day error (1.71°F) masked a 2.88°F
+   GW-hour error — now correctly blocked. Uses per-city timezone via `config.cities[].tz`
+   in a `VALUES` join, not a single UTC window.
+
+2. **True median replaces weighted average**: `pws_corrected_median` was actually a
+   distance-weighted mean (`sum(temp*weight)/totalWeight`). With 3 stations, an outlier
+   pulled the average. Now uses a true median — with 3 stations the outlier is discarded.
+   Also fixes warmup weight bug where 0.5 weight dwarfed distance weights (0.03-0.05),
+   making warmup stations dominate at 86% influence.
+
+**Eligibility changes**: Seattle OUT (1.71→2.88), NYC IN (2.26→1.68). 12 eligible cities.
+
+**Files:** `lib/metar-observer.js`
+
+---
+
+### Previous — Replace 8 dead/broken PWS stations across 8 cities
 
 **Date:** 2026-03-01
 
