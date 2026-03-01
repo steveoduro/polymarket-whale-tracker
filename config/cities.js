@@ -66,7 +66,7 @@ const cities = {
     unit: 'F',
     nwsStation: 'KMSY',
     wuCountry: 'US',
-    pwsStations: ['KLANEWOR292', 'KLAGRETN14', 'KLANEWOR490'],
+    pwsStations: ['KLANEWOR292', 'KLANEWOR490'], // KLAGRETN14 removed — reports -25°F constantly (broken sensor)
   },
 
   // ── US Midwest ────────────────────────────────────────────────────
