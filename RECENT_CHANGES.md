@@ -1,10 +1,32 @@
 # Recent Changes Log
 
-Last updated: 2026-03-01 03:10 UTC
+Last updated: 2026-03-01 03:40 UTC
 
 ## Commits
 
-### (latest) — Remove broken PWS station KLAGRETN14
+### (latest) — Replace 8 dead/broken PWS stations across 8 cities
+
+**Date:** 2026-03-01
+
+Full health audit of all 76 PWS stations revealed 7 never reported and 7 with <50% uptime.
+Replaced dead/broken stations with nearby active alternatives found via WU API.
+
+- **Boston**: KMAJAMAI25 → KMABOSTO395 (dead, invalid JSON)
+- **Philadelphia**: KPAPHILA367 → KPAPHILA259 (5% uptime)
+- **DC**: KDCWASHI468/600 → KDCWASHI467/481 (31% uptime each)
+- **New Orleans**: KLANEWOR292/490 → KLAGRETN52/KLANEWOR447 (temp=null, broken sensors)
+- **San Antonio**: KTXSANAN2786 → KTXSANAN2227 (temp=null, broken sensor)
+- **Denver**: KCODENVE1305+KCODENVE1144 removed, KCODENVE1252 added (never online + 1% uptime)
+- **Vegas**: KNVLASVE1650 → KNVLASVE611 (8% uptime)
+- **Paris**: IPARIS18258 → ISAINT5183 (dead, invalid JSON)
+
+Result: 55 stations online (up from 46-47), 11 PWS GW eligible cities
+
+**Files:** `config/cities.js`
+
+---
+
+### Previous — Remove broken PWS station KLAGRETN14
 
 **Date:** 2026-03-01
 
@@ -56,13 +78,16 @@ Files: `config.js`, `lib/resolver.js`
 
 ---
 
-## Post-Deployment Logs (2026-03-01 03:10 UTC)
+## Post-Deployment Logs (2026-03-01 03:40 UTC)
 
 ```
-Fast poll running stable after KLAGRETN14 removal:
-  24 cities polled, 46-47 PWS stations online
-  6-7 PWS GW eligible cities, 0 crossings detected (overnight — expected)
-  9 WU responses/cycle, 23 PWS rows/cycle
-  No KLAGRETN14 spam in logs
-  Empty error log
+PWS station bias updated: 70 stations, 7 unreliable
+PWS bias cache loaded: 60 reliable, 3 warmup, 7 unreliable
+Fast poll WU: 9/9 responses
+PWS avg error cache loaded: 25 cities, 11 eligible: buenos aires(1.25), chicago(1.56),
+  dallas(1.81), dc(1.72), london(0.68), minneapolis(1.18), paris(1.1), sao paulo(1.51),
+  seattle(1.7), toronto(0.95), wellington(1.04)
+PWS GW: 7 eligible cities, 5 crossings detected (first poll), 0 on dedup (second poll)
+PWS: 23 rows written, 23 cities, 55 stations online
+Empty error log
 ```

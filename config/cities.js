@@ -21,7 +21,7 @@ const cities = {
     unit: 'F',
     nwsStation: 'KBOS',
     wuCountry: 'US',
-    pwsStations: ['KMABOSTO331', 'KMAJAMAI25', 'KMASOMER98'],
+    pwsStations: ['KMABOSTO331', 'KMABOSTO395', 'KMASOMER98'], // KMAJAMAI25 replaced — dead (invalid JSON)
   },
   philadelphia: {
     lat: 39.9526, lon: -75.1652,
@@ -29,7 +29,7 @@ const cities = {
     unit: 'F',
     nwsStation: 'KPHL',
     wuCountry: 'US',
-    pwsStations: ['KPAPHILA367', 'KPAPHILA508', 'KNJHADDO33'],
+    pwsStations: ['KPAPHILA259', 'KPAPHILA508', 'KNJHADDO33'], // KPAPHILA367 replaced — 5% uptime
   },
   dc: {
     lat: 38.9072, lon: -77.0369,
@@ -37,7 +37,7 @@ const cities = {
     unit: 'F',
     nwsStation: 'KDCA',
     wuCountry: 'US',
-    pwsStations: ['KDCWASHI468', 'KDCWASHI286', 'KDCWASHI600'],
+    pwsStations: ['KDCWASHI467', 'KDCWASHI286', 'KDCWASHI481'], // KDCWASHI468/600 replaced — 31% uptime each
   },
 
   // ── US Southeast ──────────────────────────────────────────────────
@@ -66,7 +66,7 @@ const cities = {
     unit: 'F',
     nwsStation: 'KMSY',
     wuCountry: 'US',
-    pwsStations: ['KLANEWOR292', 'KLANEWOR490'], // KLAGRETN14 removed — reports -25°F constantly (broken sensor)
+    pwsStations: ['KLAGRETN52', 'KLANEWOR447'], // KLANEWOR292/490 replaced — temp=null (broken sensors); KLAGRETN14 removed earlier
   },
 
   // ── US Midwest ────────────────────────────────────────────────────
@@ -130,7 +130,7 @@ const cities = {
     unit: 'F',
     nwsStation: 'KSAT',
     wuCountry: 'US',
-    pwsStations: ['KTXSANAN2786', 'KTXSANAN3718', 'KTXSANAN2533'],
+    pwsStations: ['KTXSANAN2227', 'KTXSANAN3718', 'KTXSANAN2533'], // KTXSANAN2786 replaced — temp=null (broken sensor)
   },
 
   // ── US West ───────────────────────────────────────────────────────
@@ -149,7 +149,7 @@ const cities = {
     unit: 'F',
     nwsStation: 'KDEN',
     wuCountry: 'US',
-    pwsStations: ['KCODENVE1305', 'KCODENVE1144', 'KCODENVE1541'],
+    pwsStations: ['KCODENVE1252', 'KCODENVE1541'], // KCODENVE1305 (never online) + KCODENVE1144 (1% uptime) removed
   },
   vegas: {
     lat: 36.1699, lon: -115.1398,
@@ -157,7 +157,7 @@ const cities = {
     unit: 'F',
     nwsStation: 'KLAS',
     wuCountry: 'US',
-    pwsStations: ['KNVLASVE1650', 'KNVLASVE932', 'KNVNORTH120'],
+    pwsStations: ['KNVLASVE611', 'KNVLASVE932', 'KNVNORTH120'], // KNVLASVE1650 replaced — 8% uptime
   },
   'san francisco': {
     lat: 37.7749, lon: -122.4194,
@@ -240,7 +240,7 @@ const cities = {
     unit: 'C',
     polymarketStation: 'LFPG',
     wuCountry: 'FR',
-    pwsStations: ['IPARIS18258', 'IPARIS18247', 'IMALAKOF172'],
+    pwsStations: ['ISAINT5183', 'IPARIS18247', 'IMALAKOF172'], // IPARIS18258 replaced — dead (invalid JSON)
   },
   'sao paulo': {
     lat: -23.5505, lon: -46.6333,
