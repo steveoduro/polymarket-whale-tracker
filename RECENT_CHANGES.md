@@ -4,7 +4,20 @@ Last updated: 2026-03-01 05:40 UTC
 
 ## Commits
 
-### (latest) — Detect unbounded lower NO ranges in GW entry
+### (latest) — Delay Kalshi resolution until 7 AM local
+
+**Date:** 2026-03-01
+
+Resolver was resolving Kalshi trades at midnight local using preliminary NWS CLI data.
+Some NWS offices publish CLIs before midnight (OKC published at 11:15 PM Central).
+Added a guard: Kalshi trades wait until 7 AM local to ensure the official CLI is available.
+Polymarket unaffected — WU historical data is final at midnight.
+
+**Files:** `lib/resolver.js`
+
+---
+
+### Previous — Detect unbounded lower NO ranges in GW entry
 
 **Date:** 2026-03-01
 
