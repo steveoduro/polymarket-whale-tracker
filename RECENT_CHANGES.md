@@ -1,10 +1,21 @@
 # Recent Changes Log
 
-Last updated: 2026-03-01 02:20 UTC
+Last updated: 2026-03-01 03:10 UTC
 
 ## Commits
 
-### (latest) — Config reorganization + PWS GW strategy
+### (latest) — Remove broken PWS station KLAGRETN14
+
+**Date:** 2026-03-01
+
+- Removed KLAGRETN14 from New Orleans pwsStations — reports -25°F constantly (broken sensor)
+- Was causing 90°F deviation log spam every cycle
+
+**Files:** `config/cities.js`
+
+---
+
+### Previous — Config reorganization + PWS GW strategy
 
 **Date:** 2026-03-01
 
@@ -45,26 +56,13 @@ Files: `config.js`, `lib/resolver.js`
 
 ---
 
-## Post-Deployment Logs (2026-03-01 02:20 UTC)
+## Post-Deployment Logs (2026-03-01 03:10 UTC)
 
 ```
-Bot restarted with config split + PWS GW strategy.
-
-Startup verification:
-  Config: 14 keys, 28 cities — all values preserved
-  Bankrolls: YES $977.90 / NO $1000.00 / GW Live $10.00 / GW Paper $604.85 / PWS GW $500.00
-  PWS coverage: 25 cities x 3 stations, 1 x 2, 1 x 1, 1 x 0 (ankara)
-  7 open trades
-
-Fast poll running:
-  23 cities polled, 47-48 PWS stations online
-  0 GW detections (overnight — expected)
-  PWS data collection: 23 rows/cycle
-
-PWS GW eligible cities (12):
-  london(0.68), toronto(1.00), wellington(1.10), paris(1.10),
-  minneapolis(1.23), buenos aires(1.25), sao paulo(1.51),
-  chicago(1.66), dc(1.72), seattle(1.74), dallas(1.90), miami(1.93)
-
-Empty error log.
+Fast poll running stable after KLAGRETN14 removal:
+  24 cities polled, 46-47 PWS stations online
+  6-7 PWS GW eligible cities, 0 crossings detected (overnight — expected)
+  9 WU responses/cycle, 23 PWS rows/cycle
+  No KLAGRETN14 spam in logs
+  Empty error log
 ```
