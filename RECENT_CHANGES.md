@@ -4,7 +4,28 @@ Last updated: 2026-03-02 05:50 UTC
 
 ## Commits
 
-### (latest) — Confidence-weighted PWS GW sizing
+### (latest) — Fix PWS observation_high overwrite + persist missed GW entries
+
+**Date:** 2026-03-02
+
+Two fixes:
+
+1. **PWS observation_high preserved at resolution**: `_resolveGuaranteed()` and `_executeExit()`
+   in monitor.js unconditionally overwrote `observation_high` with METAR `running_high` at
+   resolution time. For PWS trades, this clobbered the correctedMedian stored at entry (e.g.,
+   Sao Paulo: 25.3°C detection → overwritten to 24°C METAR). Now checks `entry_reason` and
+   preserves the original value for PWS trades.
+
+2. **Missed GW entries persisted to DB**: Scanner's `scanGuaranteedWins()` and
+   `evaluateGWFastPath()` now write debounced missed entries to `system_events` table
+   (`event_type='gw_missed'`) with full context: city, date, platform, range, side, ask,
+   filter reason, observation_high, gap. Fire-and-forget — doesn't block the GW pipeline.
+
+**Files:** `lib/monitor.js`, `lib/scanner.js`
+
+---
+
+### Previous — Confidence-weighted PWS GW sizing
 
 **Date:** 2026-03-02
 
@@ -88,10 +109,10 @@ Polymarket unaffected — WU historical data is final at midnight.
 
 ---
 
-## Post-Deployment Logs (2026-03-02 05:50 UTC)
+## Post-Deployment Logs (2026-03-02 06:39 UTC)
 
 ```
-Scan complete: 56 markets, 0 approved, 618 filtered
-Evaluating 10 open positions
-PWS GW: 2 eligible cities, 0 crossings detected
+Scan complete: 48 markets, 0 approved, 568 filtered
+Evaluating 6 open positions
+Evaluation complete: 6 evaluated, 0 exits, 6 holds
 ```

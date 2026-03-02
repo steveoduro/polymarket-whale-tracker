@@ -359,6 +359,13 @@
 - Fix: fetch both stations in batch, route each station's temp to correct platform's ranges
 - Only NYC affected today (Chicago has `kalshiBlocked: true`), but future-proof for unblocking
 
+## PWS GW Sizing & Resolution (Mar 2, 2026)
+- **monitor.js overwrites observation_high at resolution**: `_resolveGuaranteedWin()` line 537 unconditionally sets `observation_high` from METAR `running_high`, clobbering the PWS `correctedMedian` stored at entry. For PWS trades, the entry-time value (the detection trigger) is the meaningful one. Fix: check `entry_reason === 'guaranteed_win_pws'` and preserve the original value.
+- **Three multiplicative sizing factors compound too aggressively**: city × gap × time produced $0.82-$11.43 positions on a $500 bankroll. Gap factor was the killer — early PWS detections inherently have minimum gaps (~0.5°), giving gap_factor=0.33. Removed gap; final formula: `bankroll × 15% × city_factor × time_factor`.
+- **Don't penalize early detection for having small gaps**: The whole value of PWS is early entry at low prices when METAR hasn't crossed yet. Gap will always be minimal at that point. Penalizing gap penalizes the strategy's core value.
+- **PWS fleeting spikes can trigger false entries**: Sao Paulo correctedMedian spiked 23.7→25.3→24.3 in ~7 minutes. Single-poll detection entered on the spike; METAR never confirmed. Consider requiring 2+ consecutive polls above threshold.
+- **High-ask GW trades (>80¢) have poor capital efficiency**: Day 1 data: >80¢ trades returned 4.9-10.5% ROI vs 37-133% for ≤80¢. They win but the return doesn't justify the variance.
+
 ## PWS Station Reliability (Mar 1, 2026)
 - **Overall stddev is misleading for PWS stations**: High overall stddev is driven by predictable diurnal (solar radiation) patterns, NOT random noise. Phoenix has 22°F day/night swing but within any single hour, stddev is 0.5-3.1°F.
 - **Stddev threshold must be generous**: 2.0°F would kill 82% of °F stations. 5.0°F catches only the 9 genuinely bad stations (extreme diurnal patterns that defeat flat bias correction).
