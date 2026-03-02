@@ -57,6 +57,12 @@ module.exports = {
     MAX_ASK: 0.95,
     MIN_BID: 0.10,
     BANKROLL: 500,
+    // Confidence-weighted sizing: dollars = bankroll × MAX_BANKROLL_PCT × city_factor × time_factor
+    // city_factor = (MAX_ERROR - avgError) / MAX_ERROR, clamped [MIN_CONFIDENCE, 1.0]
+    // time_factor = 1.0 before FULL hour, linear decay to MIN by REDUCED hour
     MAX_BANKROLL_PCT: 0.15,
+    MIN_CONFIDENCE_FACTOR: 0.3,
+    TIME_FULL_CONFIDENCE_HOUR: 12,
+    TIME_REDUCED_HOUR: 15,
   },
 };

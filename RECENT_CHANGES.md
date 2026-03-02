@@ -1,10 +1,34 @@
 # Recent Changes Log
 
-Last updated: 2026-03-01 22:45 UTC
+Last updated: 2026-03-02 05:50 UTC
 
 ## Commits
 
-### (latest) — Cap model calibration correction ratio
+### (latest) — Confidence-weighted PWS GW sizing
+
+**Date:** 2026-03-02
+
+Replaced flat 15%-of-bankroll PWS sizing with confidence-weighted formula:
+`dollars = bankroll × 15% × city_factor × time_factor`
+
+- **city_factor**: `(MAX_ERROR - avgError) / MAX_ERROR`, clamped [0.30, 1.00].
+  London (0.53° error) → 0.73, NYC (1.79°) → 0.30, Miami (2.29°) → 0.30.
+- **time_factor**: 1.0 before noon local, linear decay to 0.30 by 3pm+.
+  Morning detections get full sizing; late afternoon entries penalized.
+
+Data-driven: all 7 GW losses had either low ask + late hour (0W/3L after 3pm at <40¢)
+or minimum 0.5° gap at borderline cities. The Sao Paulo loss ($38.88 old → $16.80 new)
+gets double-penalized by city error floor + midday time factor.
+
+Day 1 PWS results: 6W/1L/4 open on 11 trades (+$155.99 P&L). Gap removed as sizing
+factor — early PWS detections inherently have small gaps, penalizing the strategy's
+core value (early entry at low prices).
+
+**Files:** `config/observation.js`, `lib/executor.js`, `lib/scanner.js`
+
+---
+
+### Previous — Cap model calibration correction ratio
 
 **Date:** 2026-03-01
 
@@ -64,13 +88,10 @@ Polymarket unaffected — WU historical data is final at midnight.
 
 ---
 
-## Post-Deployment Logs (2026-03-01 22:45 UTC)
+## Post-Deployment Logs (2026-03-02 05:50 UTC)
 
 ```
-PWS avg error cache loaded: 26 cities, 9 eligible: buenos aires(1.25), chicago(0.84),
-  dallas(1.3), london(0.6), nyc(1.18), paris(1.18), sao paulo(0.93), toronto(1.32),
-  wellington(0.77)
-Scan complete: 67 markets, 0 approved, 740 filtered
-Evaluating 18 open positions, 0 exits, 18 holds
-PWS GW: 8 eligible cities, 0 crossings detected
+Scan complete: 56 markets, 0 approved, 618 filtered
+Evaluating 10 open positions
+PWS GW: 2 eligible cities, 0 crossings detected
 ```
